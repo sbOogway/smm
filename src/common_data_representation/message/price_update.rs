@@ -11,17 +11,6 @@ pub struct PriceUpdate {
 }
 
 impl PriceUpdate {
-    pub fn empty() -> Self {
-        Self {
-            exchange: String::new(),
-            symbol: String::new(),
-            side: String::new(),
-            price: Decimal::ZERO,
-            size: Decimal::ZERO,
-            time: 0,
-        }
-    }
-
     pub fn handle(&self, _seq: i64, _batch: bool) {
         tracing::info!(
             exchange = %self.exchange,

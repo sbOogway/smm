@@ -8,30 +8,29 @@ use crate::config::AppConfig;
 
 use self::hyperliquid::Hyperliquid;
 
-use super::common_data_representation::price_update::PriceUpdate;
+use super::common_data_representation::message::Message;
 
 pub trait Executor {
     fn send_order(&self);
     fn cancel_order(&self);
 }
 
-pub trait DataProvider<T> {
+pub trait DataProvider {
     fn listen_trades(
         &self,
-        disruptor: MultiProducer<T, SingleConsumerBarrier>,
+        disruptor: MultiProducer<Message, SingleConsumerBarrier>,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
 }
 
-pub trait Exchange<T>: DataProvider<T> + Executor + Send + Sync {}
+pub trait Exchange: DataProvider + Executor + Send + Sync {}
 
-pub fn create_exchange(name: &str, cfg: &AppConfig) -> Box<dyn Exchange<PriceUpdate>> {
+pub fn new(name: &str, cfg: &AppConfig) -> Box<dyn Exchange> {
     match name {
         "hyperliquid" => Box::new(Hyperliquid::new(
             cfg.exchange
                 .hyperliquid
                 .clone()
-                .expect("missing [exchange.hyperliquid] config")
-                .coins,
+                .expect("missing [exchange.hyperliquid] config"),
         )),
         other => panic!("unknown exchange: {other}"),
     }

@@ -59,11 +59,13 @@ flowchart TD
 
         exchange --> data_provider
         exchange --> executor
+        exchange --> message
 
         common_data_representation --> disruptor
         common_data_representation --> turso_db
+        common_data_representation --> message
     end
 ```
 
 > [!tip]
-> use `cargo modules dependencies` to verify that there are no circular dependencies
+> use `cargo test` to verify that there are no circular dependencies

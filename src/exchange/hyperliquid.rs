@@ -9,7 +9,8 @@ use rust_decimal::Decimal;
 use std::str::FromStr;
 
 use crate::{
-    common_data_representation::price_update::PriceUpdate,
+    common_data_representation::message::{Message as AppMessage, PriceUpdate},
+    config::HyperliquidConfig,
     exchange::{DataProvider, Exchange, Executor},
 };
 
@@ -17,7 +18,6 @@ const WS_URL: &str = "wss://api.hyperliquid.xyz/ws";
 
 pub struct Hyperliquid {
     coins: Vec<String>,
-    ws_url: String,
 }
 
 #[derive(Serialize)]
@@ -51,23 +51,19 @@ struct WsTrade {
 }
 
 impl Hyperliquid {
-    pub fn new(coins: Vec<String>) -> Self {
-        Self {
-            coins,
-            ws_url: WS_URL.into(),
-        }
+    pub fn new(cfg: HyperliquidConfig) -> Self {
+        Self { coins: cfg.coins }
     }
 }
 
-impl DataProvider<PriceUpdate> for Hyperliquid {
+impl DataProvider for Hyperliquid {
     fn listen_trades(
         &self,
-        mut disruptor: MultiProducer<PriceUpdate, SingleConsumerBarrier>,
+        mut disruptor: MultiProducer<AppMessage, SingleConsumerBarrier>,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        let ws_url = self.ws_url.clone();
         let coins = self.coins.clone();
         Box::pin(async move {
-            let (mut ws_stream, response) = connect_async(&ws_url).await.unwrap();
+            let (mut ws_stream, response) = connect_async(WS_URL).await.unwrap();
 
             tracing::info!(status = %response.status(), "connected");
 
@@ -121,13 +117,15 @@ impl DataProvider<PriceUpdate> for Hyperliquid {
                                 continue;
                             }
                         };
-                        disruptor.publish(|slot: &mut PriceUpdate| {
-                            slot.exchange = "hyperliquid".into();
-                            slot.symbol = trade.coin;
-                            slot.side = trade.side;
-                            slot.price = price;
-                            slot.size = size;
-                            slot.time = trade.time;
+                        disruptor.publish(|slot: &mut AppMessage| {
+                            *slot = AppMessage::PriceUpdate(PriceUpdate {
+                                exchange: "hyperliquid".into(),
+                                symbol: trade.coin,
+                                side: trade.side,
+                                price,
+                                size,
+                                time: trade.time,
+                            });
                         });
                     }
                 }
@@ -146,7 +144,7 @@ impl Executor for Hyperliquid {
     }
 }
 
-impl Exchange<PriceUpdate> for Hyperliquid {}
+impl Exchange for Hyperliquid {}
 
 #[cfg(test)]
 mod tests {

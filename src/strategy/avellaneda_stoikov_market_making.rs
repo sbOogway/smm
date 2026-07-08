@@ -2,15 +2,15 @@ use async_trait::async_trait;
 use futures_util::future;
 
 use crate::{
-    common_data_representation::{disruptor::Disruptor, price_update::PriceUpdate},
+    common_data_representation::{disruptor::Disruptor, message::Message},
     config::AppConfig,
-    exchange::{Exchange, create_exchange},
+    exchange::{self, Exchange},
     strategy::Strategy,
 };
 
 pub struct AvellanedaStoikovMarketMaking {
-    exchanges: Vec<Box<dyn Exchange<PriceUpdate>>>,
-    producer: disruptor::MultiProducer<PriceUpdate, disruptor::SingleConsumerBarrier>,
+    exchanges: Vec<Box<dyn Exchange>>,
+    producer: disruptor::MultiProducer<Message, disruptor::SingleConsumerBarrier>,
 }
 
 #[async_trait]
@@ -18,7 +18,7 @@ impl Strategy for AvellanedaStoikovMarketMaking {
     fn new(cfg: &AppConfig) -> Self {
         let d = Disruptor::new(
             cfg.disruptor.buffer_size,
-            || PriceUpdate::empty(),
+            || Message::empty(),
             |update, seq, batch| update.handle(seq, batch),
         );
         Self {
@@ -26,7 +26,7 @@ impl Strategy for AvellanedaStoikovMarketMaking {
                 .runtime
                 .exchanges
                 .iter()
-                .map(|name| create_exchange(name, cfg))
+                .map(|name| exchange::new(name, cfg))
                 .collect(),
             producer: d.producer,
         }
