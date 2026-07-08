@@ -8,7 +8,10 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use rust_decimal::Decimal;
 use std::str::FromStr;
 
-use crate::{common_data_representation::price_update::PriceUpdate, exchange::traits::{DataProvider, Exchange, Executor}};
+use crate::{
+    common_data_representation::price_update::PriceUpdate,
+    exchange::{DataProvider, Exchange, Executor},
+};
 
 const WS_URL: &str = "wss://api.hyperliquid.xyz/ws";
 
@@ -154,8 +157,7 @@ mod tests {
 
     #[tokio::test]
     async fn connect_and_receive_trades() {
-        let (mut ws_stream, response) =
-            connect_async(WS_URL).await.expect("failed to connect");
+        let (mut ws_stream, response) = connect_async(WS_URL).await.expect("failed to connect");
 
         assert!(
             response.status().is_success() || response.status().as_u16() == 101,
@@ -199,10 +201,8 @@ mod tests {
             assert!(!trades.is_empty(), "expected at least one trade");
 
             for trade in &trades {
-                let price = Decimal::from_str(&trade.price)
-                    .expect("failed to parse price");
-                let size = Decimal::from_str(&trade.size)
-                    .expect("failed to parse size");
+                let price = Decimal::from_str(&trade.price).expect("failed to parse price");
+                let size = Decimal::from_str(&trade.size).expect("failed to parse size");
                 assert!(price > Decimal::ZERO, "price must be positive");
                 assert!(size > Decimal::ZERO, "size must be positive");
             }
@@ -215,8 +215,7 @@ mod tests {
 
     #[tokio::test]
     async fn ping_latency_under_500ms() {
-        let (mut ws_stream, response) =
-            connect_async(WS_URL).await.expect("failed to connect");
+        let (mut ws_stream, response) = connect_async(WS_URL).await.expect("failed to connect");
 
         assert!(
             response.status().is_success() || response.status().as_u16() == 101,

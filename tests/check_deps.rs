@@ -23,12 +23,7 @@ fn no_circular_dependencies() {
         .spawn()
         .expect("failed to run `tred` (is graphviz installed?)");
 
-    child
-        .stdin
-        .take()
-        .unwrap()
-        .write_all(&dot.stdout)
-        .unwrap();
+    child.stdin.take().unwrap().write_all(&dot.stdout).unwrap();
 
     let output = child.wait_with_output().unwrap();
     let stderr = String::from_utf8_lossy(&output.stderr);

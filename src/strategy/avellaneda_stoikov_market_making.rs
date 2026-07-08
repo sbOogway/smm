@@ -1,7 +1,11 @@
+use async_trait::async_trait;
 use futures_util::future;
 
 use crate::{
-    common_data_representation::{disruptor::Disruptor, price_update::PriceUpdate}, config::AppConfig, exchange::{create_exchange, traits::Exchange}, 
+    common_data_representation::{disruptor::Disruptor, price_update::PriceUpdate},
+    config::AppConfig,
+    exchange::{Exchange, create_exchange},
+    strategy::Strategy,
 };
 
 pub struct AvellanedaStoikovMarketMaking {
@@ -9,8 +13,9 @@ pub struct AvellanedaStoikovMarketMaking {
     producer: disruptor::MultiProducer<PriceUpdate, disruptor::SingleConsumerBarrier>,
 }
 
-impl AvellanedaStoikovMarketMaking {
-    pub fn new(cfg: &AppConfig) -> Self {
+#[async_trait]
+impl Strategy for AvellanedaStoikovMarketMaking {
+    fn new(cfg: &AppConfig) -> Self {
         let d = Disruptor::new(
             cfg.disruptor.buffer_size,
             || PriceUpdate::empty(),
@@ -27,7 +32,7 @@ impl AvellanedaStoikovMarketMaking {
         }
     }
 
-    pub async fn run(self) {
+    async fn run(self: Box<Self>) {
         for exchange in self.exchanges {
             let producer = self.producer.clone();
             tokio::spawn(async move {

@@ -1,8 +1,8 @@
 use tracing_subscriber::EnvFilter;
 
 use crate::{
-    config::{AppConfig, AvellanedaStoikovConfig},
-    strategy::avellaneda_stoikov_market_making::AvellanedaStoikovMarketMaking,
+    config::AppConfig,
+    strategy::{Strategy, avellaneda_stoikov_market_making::AvellanedaStoikovMarketMaking},
 };
 
 mod common_data_representation;
@@ -20,8 +20,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!(?cfg, "configuration loaded");
 
-    let strategy = match cfg.runtime.strategy.as_str() {
-        "avellaneda_stoikov_market_making" => AvellanedaStoikovMarketMaking::new(&cfg),
+    let strategy: Box<dyn Strategy> = match cfg.runtime.strategy.as_str() {
+        "avellaneda_stoikov_market_making" => Box::new(AvellanedaStoikovMarketMaking::new(&cfg)),
         _ => panic!("strategy not implemented"),
     };
 

@@ -1,14 +1,28 @@
 pub mod hyperliquid;
-pub mod traits;
+
+use std::{future::Future, pin::Pin};
+
+use disruptor::{MultiProducer, SingleConsumerBarrier};
 
 use crate::config::AppConfig;
 
-use self::{
-    hyperliquid::Hyperliquid,
-    traits::Exchange,
-};
+use self::hyperliquid::Hyperliquid;
 
 use super::common_data_representation::price_update::PriceUpdate;
+
+pub trait Executor {
+    fn send_order(&self);
+    fn cancel_order(&self);
+}
+
+pub trait DataProvider<T> {
+    fn listen_trades(
+        &self,
+        disruptor: MultiProducer<T, SingleConsumerBarrier>,
+    ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
+}
+
+pub trait Exchange<T>: DataProvider<T> + Executor + Send + Sync {}
 
 pub fn create_exchange(name: &str, cfg: &AppConfig) -> Box<dyn Exchange<PriceUpdate>> {
     match name {

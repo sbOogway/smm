@@ -1,9 +1,6 @@
 use std::time::Duration;
 
-use disruptor::{
-    MultiProducer, ProcessorSettings, SingleConsumerBarrier, Sleep,
-};
-
+use disruptor::{MultiProducer, ProcessorSettings, SingleConsumerBarrier, Sleep};
 
 pub struct Disruptor<T> {
     pub producer: MultiProducer<T, SingleConsumerBarrier>,

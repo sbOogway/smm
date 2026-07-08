@@ -624,6 +624,7 @@ dependencies = [
 name = "mma"
 version = "0.1.0"
 dependencies = [
+ "async-trait",
  "config",
  "disruptor",
  "futures-util",
