@@ -52,6 +52,8 @@ flowchart TD
 ```mermaid
 flowchart TD
     subgraph dependency_graph
+        config --> strategy
+
         strategy --> exchange
         strategy --> common_data_representation
 

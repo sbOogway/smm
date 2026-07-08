@@ -2,7 +2,7 @@
 coins = ["BTC", "ETH", "SOL"]
 
 [disruptor]
-buffer_size = 65536
+buffer_size = 1024
 
 [strategy.avellaneda_stoikov_market_making]
 gamma = 0.1
