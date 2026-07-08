@@ -47,3 +47,21 @@ flowchart TD
     execution_logic --> executor
 
 ```
+
+## dependency graph
+```mermaid
+flowchart TD
+    subgraph dependency_graph
+        strategy --> exchange
+        strategy --> common_data_representation
+
+        exchange --> data_provider
+        exchange --> executor
+
+        common_data_representation --> disruptor
+        common_data_representation --> turso_db
+    end
+```
+
+> [!tip]
+> use `cargo modules dependencies` to verify that there are no circular dependencies

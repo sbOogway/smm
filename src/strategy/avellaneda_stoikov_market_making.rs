@@ -1,14 +1,7 @@
 use futures_util::future;
 
 use crate::{
-    config::AppConfig,
-    strategy::{
-        common_data_representation::{
-            disruptor::Disruptor,
-            price_update::PriceUpdate,
-        },
-        exchange::{traits::Exchange, create_exchange},
-    },
+    common_data_representation::{disruptor::Disruptor, price_update::PriceUpdate}, config::AppConfig, exchange::{create_exchange, traits::Exchange}, 
 };
 
 pub struct AvellanedaStoikovMarketMaking {

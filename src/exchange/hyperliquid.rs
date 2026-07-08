@@ -8,10 +8,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 use rust_decimal::Decimal;
 use std::str::FromStr;
 
-use crate::strategy::{
-    common_data_representation::price_update::PriceUpdate,
-    exchange::traits::{DataProvider, Exchange, Executor},
-};
+use crate::{common_data_representation::price_update::PriceUpdate, exchange::traits::{DataProvider, Exchange, Executor}};
 
 const WS_URL: &str = "wss://api.hyperliquid.xyz/ws";
 
