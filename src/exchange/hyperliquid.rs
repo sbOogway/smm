@@ -156,6 +156,7 @@ impl DataProvider for Hyperliquid {
                                 Ok(b) => b,
                                 Err(_) => continue,
                             };
+                            tracing::debug!(coin = %bbo.coin, "bbo received");
 
                             let (bid, ask) = match bbo.bbo {
                                 [Some(b), Some(a)] => (b, a),
