@@ -9,6 +9,8 @@ pub struct MqttPublisher;
 
 impl MqttPublisher {
     pub async fn run(config: MqttConfig, mut rx: mpsc::Receiver<Message>) {
+        tracing::info!("mqtt publisher starting: {}/{}", config.broker, config.port);
+
         let mqttoptions = {
             let mut opts = MqttOptions::new(&config.client_id, &config.broker, config.port);
             opts.set_keep_alive(std::time::Duration::from_secs(30));
@@ -18,81 +20,58 @@ impl MqttPublisher {
 
         let (client, eventloop) = AsyncClient::new(mqttoptions, 100);
 
-        let publish = |msg: Message| {
-            let topic = match topic_for(&config, &msg) {
-                Some(t) => t,
-                None => return,
-            };
-            let payload = match payload_for(&msg) {
-                Some(p) => p,
-                None => return,
-            };
-            let client = client.clone();
-            tokio::spawn(async move {
-                if let Err(e) = client.publish(&topic, QoS::AtLeastOnce, false, payload).await {
-                    tracing::warn!(error = %e, topic = %topic, "mqtt publish failed");
-                }
-            });
-        };
+        tokio::spawn(poll_eventloop(eventloop));
 
-        poll_loop(eventloop, &mut rx, publish).await;
+        tracing::info!("mqtt publisher ready, waiting for messages");
+
+        while let Some(msg) = rx.recv().await {
+            match msg {
+                Message::TradeUpdate(t) => {
+                    let topic = format!("{}/hyperliquid/price/{}", config.topic_prefix, t.symbol);
+                    let payload = serde_json::json!({ "price": t.price.to_f64().unwrap_or(0.0) }).to_string();
+                    tracing::debug!(topic = %topic, payload = %payload, "mqtt publish trade");
+                    if let Err(e) = client.publish(&topic, QoS::AtMostOnce, false, payload).await {
+                        tracing::warn!(error = %e, topic = %topic, "mqtt publish failed");
+                    }
+                }
+                Message::BboUpdate(b) => {
+                    let bid_topic = format!("{}/hyperliquid/bid/{}", config.topic_prefix, b.symbol);
+                    let bid_payload = serde_json::json!({ "bid": b.bid_price.to_f64().unwrap_or(0.0) }).to_string();
+                    tracing::debug!(topic = %bid_topic, payload = %bid_payload, "mqtt publish bid");
+                    if let Err(e) = client.publish(&bid_topic, QoS::AtMostOnce, false, bid_payload).await {
+                        tracing::warn!(error = %e, topic = %bid_topic, "mqtt publish failed");
+                    }
+
+                    let ask_topic = format!("{}/hyperliquid/ask/{}", config.topic_prefix, b.symbol);
+                    let ask_payload = serde_json::json!({ "ask": b.ask_price.to_f64().unwrap_or(0.0) }).to_string();
+                    tracing::debug!(topic = %ask_topic, payload = %ask_payload, "mqtt publish ask");
+                    if let Err(e) = client.publish(&ask_topic, QoS::AtMostOnce, false, ask_payload).await {
+                        tracing::warn!(error = %e, topic = %ask_topic, "mqtt publish failed");
+                    }
+                }
+                Message::Empty => {}
+            }
+        }
+
+        tracing::warn!("mqtt publisher channel closed, exiting");
     }
 }
 
-async fn poll_loop(
-    mut eventloop: EventLoop,
-    rx: &mut mpsc::Receiver<Message>,
-    publish: impl Fn(Message),
-) {
+async fn poll_eventloop(mut eventloop: EventLoop) {
+    tracing::info!("mqtt eventloop started");
+
     loop {
-        tokio::select! {
-            msg = rx.recv() => {
-                match msg {
-                    Some(msg) => publish(msg),
-                    None => break,
-                }
+        match eventloop.poll().await {
+            Ok(rumqttc::Event::Incoming(incoming)) => {
+                tracing::trace!(?incoming, "mqtt incoming");
             }
-            event = eventloop.poll() => {
-                match event {
-                    Ok(_) => {}
-                    Err(e) => {
-                        tracing::warn!(error = %e, "mqtt eventloop error");
-                    }
-                }
+            Ok(rumqttc::Event::Outgoing(outgoing)) => {
+                tracing::trace!(?outgoing, "mqtt outgoing");
+            }
+            Err(e) => {
+                tracing::warn!(error = %e, "mqtt eventloop error, reconnecting in 1s");
+                tokio::time::sleep(std::time::Duration::from_secs(1)).await;
             }
         }
     }
-}
-
-fn topic_for(config: &MqttConfig, msg: &Message) -> Option<String> {
-    let (kind, symbol) = match msg {
-        Message::TradeUpdate(t) => ("trades", &t.symbol),
-        Message::BboUpdate(b) => ("bbo", &b.symbol),
-        Message::Empty => return None,
-    };
-    Some(format!("{}/hyperliquid/{kind}/{symbol}", config.topic_prefix))
-}
-
-fn payload_for(msg: &Message) -> Option<String> {
-    let value = match msg {
-        Message::TradeUpdate(t) => serde_json::json!({
-            "exchange": t.exchange,
-            "symbol": t.symbol,
-            "side": t.side,
-            "price": t.price.to_f64().unwrap_or(0.0),
-            "size": t.size.to_f64().unwrap_or(0.0),
-            "time": t.time,
-        }),
-        Message::BboUpdate(b) => serde_json::json!({
-            "exchange": b.exchange,
-            "symbol": b.symbol,
-            "bid_price": b.bid_price.to_f64().unwrap_or(0.0),
-            "bid_size": b.bid_size.to_f64().unwrap_or(0.0),
-            "ask_price": b.ask_price.to_f64().unwrap_or(0.0),
-            "ask_size": b.ask_size.to_f64().unwrap_or(0.0),
-            "time": b.time,
-        }),
-        Message::Empty => return None,
-    };
-    Some(value.to_string())
 }
