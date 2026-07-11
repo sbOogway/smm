@@ -1,6 +1,6 @@
 use rust_decimal::Decimal;
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TradeUpdate {
     pub exchange: String,
     pub symbol: String,

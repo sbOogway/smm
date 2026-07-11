@@ -4,6 +4,7 @@ pub mod trade_update;
 pub use bbo_update::BboUpdate;
 pub use trade_update::TradeUpdate;
 
+#[derive(Clone)]
 pub enum Message {
     Empty,
     TradeUpdate(TradeUpdate),

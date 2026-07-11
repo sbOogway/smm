@@ -1,5 +1,7 @@
 use std::{future::Future, pin::Pin};
 
+use tokio::sync::mpsc;
+
 use disruptor::{MultiProducer, Producer, SingleConsumerBarrier};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
@@ -75,6 +77,7 @@ impl DataProvider for Hyperliquid {
     fn listen(
         &self,
         mut disruptor: MultiProducer<AppMessage, SingleConsumerBarrier>,
+        mqtt_tx: mpsc::Sender<AppMessage>,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
         let coins = self.coins.clone();
         Box::pin(async move {
@@ -134,16 +137,18 @@ impl DataProvider for Hyperliquid {
                                         continue;
                                     }
                                 };
-                                disruptor.publish(|slot: &mut AppMessage| {
-                                    *slot = AppMessage::TradeUpdate(TradeUpdate {
-                                        exchange: "hyperliquid".into(),
-                                        symbol: trade.coin,
-                                        side: trade.side,
-                                        price,
-                                        size,
-                                        time: trade.time,
-                                    });
+                                let trade_msg = AppMessage::TradeUpdate(TradeUpdate {
+                                    exchange: "hyperliquid".into(),
+                                    symbol: trade.coin,
+                                    side: trade.side,
+                                    price,
+                                    size,
+                                    time: trade.time,
                                 });
+                                disruptor.publish(|slot: &mut AppMessage| {
+                                    *slot = trade_msg.clone();
+                                });
+                                let _ = mqtt_tx.try_send(trade_msg);
                             }
                         }
                         "bbo" => {
@@ -186,17 +191,19 @@ impl DataProvider for Hyperliquid {
                                 }
                             };
 
-                            disruptor.publish(|slot: &mut AppMessage| {
-                                *slot = AppMessage::BboUpdate(BboUpdate {
-                                    exchange: "hyperliquid".into(),
-                                    symbol: bbo.coin,
-                                    bid_price,
-                                    bid_size,
-                                    ask_price,
-                                    ask_size,
-                                    time: bbo.time,
-                                });
+                            let bbo_msg = AppMessage::BboUpdate(BboUpdate {
+                                exchange: "hyperliquid".into(),
+                                symbol: bbo.coin,
+                                bid_price,
+                                bid_size,
+                                ask_price,
+                                ask_size,
+                                time: bbo.time,
                             });
+                            disruptor.publish(|slot: &mut AppMessage| {
+                                *slot = bbo_msg.clone();
+                            });
+                            let _ = mqtt_tx.try_send(bbo_msg);
                         }
                         _ => continue,
                     }

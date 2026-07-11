@@ -9,6 +9,12 @@ gamma = 0.1
 q = 0.0
 sigma = 0.02
 
+[mqtt]
+broker = "localhost"
+port = 1883
+topic_prefix = "mma"
+client_id = "mma-publisher"
+
 [runtime]
 exchanges = ["hyperliquid"]
 strategy = "avellaneda_stoikov_market_making"

@@ -1,0 +1,50 @@
+{
+  "title": "MMA Market Data",
+  "uid": "mma-market-data",
+  "tags": ["mma", "crypto"],
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "browser",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "panels": [
+    {
+      "title": "BTC Price",
+      "type": "timeseries",
+      "id": 1,
+      "gridPos": {
+        "h": 12,
+        "w": 24,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-mqtt-datasource",
+            "uid": "mqtt"
+          },
+          "topic": "mma/hyperliquid/price/BTC"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "lineWidth": 2,
+            "showPoints": "never"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "calcs": ["last"],
+          "displayMode": "hidden"
+        }
+      }
+    }
+  ]
+}
