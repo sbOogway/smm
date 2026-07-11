@@ -7,5 +7,8 @@ datasources:
     access: proxy
     isDefault: false
     jsonData:
-      brokerUrl: tcp://mosquitto:1883
-      clientId: grafana-mqtt
+      uri: tcp://mosquitto:1883
+      clientID: grafana-mqtt
+      tlsAuth: false
+      tlsAuthWithCACert: false
+      tlsSkipVerify: false

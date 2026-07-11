@@ -1,5 +1,5 @@
 [exchange.hyperliquid]
-coins = ["BTC", "ETH", "SOL"]
+coins = ["ZEC", "BTC", "ETH", "SOL"]
 
 [disruptor]
 buffer_size = 1024

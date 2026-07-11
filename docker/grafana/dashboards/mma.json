@@ -9,14 +9,64 @@
     "from": "now-15m",
     "to": "now"
   },
+  "templating": {
+    "list": [
+      {
+        "name": "exchange",
+        "type": "custom",
+        "query": "hyperliquid",
+        "current": {
+          "value": "hyperliquid",
+          "text": "hyperliquid"
+        },
+        "options": [
+          {
+            "selected": true,
+            "value": "hyperliquid",
+            "text": "hyperliquid"
+          }
+        ],
+        "label": "Exchange"
+      },
+      {
+        "name": "coin",
+        "type": "custom",
+        "query": "ZEC, BTC, ETH, SOL",
+        "current": {
+          "value": "ZEC",
+          "text": "ZEC"
+        },
+        "options": [
+          {
+            "selected": true,
+            "value": "ZEC",
+            "text": "ZEC"
+          },
+          {
+            "value": "BTC",
+            "text": "BTC"
+          },
+          {
+            "value": "ETH",
+            "text": "ETH"
+          },
+          {
+            "value": "SOL",
+            "text": "SOL"
+          }
+        ],
+        "label": "Coin"
+      }
+    ]
+  },
   "panels": [
     {
-      "title": "BTC Price",
+      "title": "Trade/Bid/Ask Prices",
       "type": "timeseries",
       "id": 1,
       "gridPos": {
-        "h": 12,
-        "w": 24,
+        "h": 20,
+        "w": 36,
         "x": 0,
         "y": 0
       },
@@ -27,7 +77,23 @@
             "type": "grafana-mqtt-datasource",
             "uid": "mqtt"
           },
-          "topic": "mma/hyperliquid/price/BTC"
+          "topic": "mma/${exchange}/price/${coin}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "grafana-mqtt-datasource",
+            "uid": "mqtt"
+          },
+          "topic": "mma/${exchange}/bid/${coin}"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "grafana-mqtt-datasource",
+            "uid": "mqtt"
+          },
+          "topic": "mma/${exchange}/ask/${coin}"
         }
       ],
       "fieldConfig": {
@@ -42,9 +108,18 @@
       "options": {
         "legend": {
           "calcs": ["last"],
-          "displayMode": "hidden"
+          "displayMode": "list",
+          "placement": "bottom"
         }
-      }
+      },
+      "transformations": [
+        {
+          "id": "extractFields",
+          "options": {
+            "byField": false
+          }
+        }
+      ]
     }
   ]
 }
