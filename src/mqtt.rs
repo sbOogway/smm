@@ -27,7 +27,7 @@ impl MqttPublisher {
         while let Some(msg) = rx.recv().await {
             match msg {
                 Message::TradeUpdate(t) => {
-                    let topic = format!("{}/hyperliquid/price/{}", config.topic_prefix, t.symbol);
+                    let topic = format!("{}/{}/price/{}", config.topic_prefix, t.exchange, t.symbol);
                     let payload = serde_json::json!({ "price": t.price.to_f64().unwrap_or(0.0) }).to_string();
                     tracing::debug!(topic = %topic, payload = %payload, "mqtt publish trade");
                     if let Err(e) = client.publish(&topic, QoS::AtMostOnce, false, payload).await {
@@ -35,14 +35,14 @@ impl MqttPublisher {
                     }
                 }
                 Message::BboUpdate(b) => {
-                    let bid_topic = format!("{}/hyperliquid/bid/{}", config.topic_prefix, b.symbol);
+                    let bid_topic = format!("{}/{}/bid/{}", config.topic_prefix, b.exchange, b.symbol);
                     let bid_payload = serde_json::json!({ "bid": b.bid_price.to_f64().unwrap_or(0.0) }).to_string();
                     tracing::debug!(topic = %bid_topic, payload = %bid_payload, "mqtt publish bid");
                     if let Err(e) = client.publish(&bid_topic, QoS::AtMostOnce, false, bid_payload).await {
                         tracing::warn!(error = %e, topic = %bid_topic, "mqtt publish failed");
                     }
 
-                    let ask_topic = format!("{}/hyperliquid/ask/{}", config.topic_prefix, b.symbol);
+                    let ask_topic = format!("{}/{}/ask/{}", config.topic_prefix, b.exchange, b.symbol);
                     let ask_payload = serde_json::json!({ "ask": b.ask_price.to_f64().unwrap_or(0.0) }).to_string();
                     tracing::debug!(topic = %ask_topic, payload = %ask_payload, "mqtt publish ask");
                     if let Err(e) = client.publish(&ask_topic, QoS::AtMostOnce, false, ask_payload).await {
