@@ -1,6 +1,9 @@
+use core::panic;
 use std::{
     cell::UnsafeCell,
     collections::HashMap,
+    fmt::format,
+    os::linux::raw::stat,
     sync::{Arc, LazyLock, OnceLock},
     time::Duration,
 };
@@ -11,7 +14,10 @@ use disruptor::{
     builder::{NC, multi::MPBuilder},
 };
 use futures_util::future;
-use rust_decimal::Decimal;
+use rust_decimal::{
+    Decimal, MathematicalOps,
+    prelude::{self, One},
+};
 use tokio::sync::mpsc::{self, Sender};
 
 use crate::{
@@ -25,6 +31,60 @@ use crate::{
 pub struct AvellanedaStoikovMarketMaking {}
 
 impl AvellanedaStoikovMarketMaking {
+    fn reservation_price(s: Decimal, q: Decimal, γ: Decimal, σ: Decimal) -> Decimal {
+        return s - q * γ * σ.powi(2);
+    }
+
+    fn optimal_spread(γ: Decimal, κ: Decimal) -> Decimal {
+        let one = Decimal::ONE;
+        let two = Decimal::from(2);
+
+        return two / γ * (one + (γ / κ)).ln();
+    }
+
+    fn init_state(cfg: &AppConfig) {
+        unsafe {
+            let state = &mut *STATE.0.get();
+
+            for exchange in EXCHANGES.get().unwrap() {
+                for symbol in exchange.symbols() {
+                    let γ_key = format!("{}_{}_γ", exchange.name(), symbol);
+                    state.insert(
+                        γ_key,
+                        cfg.strategy
+                            .avellaneda_stoikov_market_making
+                            .as_ref()
+                            .unwrap()
+                            .γ,
+                    );
+
+                    let σ_key = format!("{}_{}_σ", exchange.name(), symbol);
+                    state.insert(
+                        σ_key,
+                        cfg.strategy
+                            .avellaneda_stoikov_market_making
+                            .as_ref()
+                            .unwrap()
+                            .σ,
+                    );
+
+                    let κ_key = format!("{}_{}_κ", exchange.name(), symbol);
+                    state.insert(
+                        κ_key,
+                        cfg.strategy
+                            .avellaneda_stoikov_market_making
+                            .as_ref()
+                            .unwrap()
+                            .κ,
+                    );
+
+                    let q_key = format!("{}_{}_q", exchange.name(), symbol);
+                    state.insert(q_key, Decimal::ZERO);
+                }
+            }
+        }
+    }
+
     fn handle_message(message: &Message) {
         tracing::debug!("{:#?}", message);
 
@@ -54,6 +114,21 @@ impl AvellanedaStoikovMarketMaking {
 
                 unsafe {
                     let state = &mut *STATE.0.get();
+
+                    let q_key = format!("{}_{}_q", update.exchange, update.symbol);
+                    let γ_key = format!("{}_{}_γ", update.exchange, update.symbol);
+                    let σ_key = format!("{}_{}_σ", update.exchange, update.symbol);
+                    let κ_key = format!("{}_{}_κ", update.exchange, update.symbol);
+
+                    let q = state.get(&q_key).unwrap();
+                    let γ = state.get(&γ_key).unwrap();
+                    let σ = state.get(&σ_key).unwrap();
+                    let κ = state.get(&κ_key).unwrap();
+
+                    let reservation_price =
+                        AvellanedaStoikovMarketMaking::reservation_price(mid_price, *q, *γ, *σ);
+                    
+                    let optimal_spread = AvellanedaStoikovMarketMaking::optimal_spread(*γ, *κ);
 
                     state.insert(bid_price_key, update.bid_price);
                     state.insert(bid_size_key, update.bid_size);
@@ -112,6 +187,8 @@ impl Strategy for AvellanedaStoikovMarketMaking {
                 .map(|name| exchange::new(name, cfg))
                 .collect(),
         );
+
+        AvellanedaStoikovMarketMaking::init_state(cfg);
 
         Self {}
     }

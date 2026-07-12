@@ -5,9 +5,9 @@ coins = ["ZEC", "BTC", "ETH", "SOL"]
 buffer_size = 1024
 
 [strategy.avellaneda_stoikov_market_making]
-gamma = 0.1
-q = 0.0
-sigma = 0.02
+"γ" = 0.1
+"κ" = 0.02
+"σ" = 1.0
 
 [mqtt]
 enabled = true

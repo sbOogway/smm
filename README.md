@@ -4,6 +4,7 @@
 framework for market making and arbitrage on various exchanges and assets
 
 ## architecture
+### data flow
 ```mermaid
 flowchart TD
     subgraph strategy
@@ -62,7 +63,7 @@ flowchart TD
     execution_logic --> executor
 ```
 
-## dependency graph
+### dependency graph
 ```mermaid
 flowchart TD
     subgraph dependency_graph
@@ -83,3 +84,18 @@ flowchart TD
 
 > [!tip]
 > use `cargo test` to verify that there are no circular dependencies
+
+### strategies
+#### avellaneda stoikov market making
+```mermaid
+flowchart TD
+    subgraph asmm
+        subgraph state
+            ask_price
+            bid_price
+            mid_price
+
+        end
+    end
+
+```

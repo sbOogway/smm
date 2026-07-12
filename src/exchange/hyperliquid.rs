@@ -9,9 +9,7 @@ use rust_decimal::{Decimal, prelude::Zero};
 use std::str::FromStr;
 
 use crate::{
-    common_data_representation::message::{BboUpdate, Message as AppMessage, TradeUpdate},
-    config::HyperliquidConfig,
-    exchange::{DataProvider, Exchange, Executor},
+    common_data_representation::message::{BboUpdate, Message as AppMessage, TradeUpdate}, config::HyperliquidConfig, exchange::{DataProvider, Exchange, Executor, Infos},
 };
 
 const WS_URL: &str = "wss://api.hyperliquid.xyz/ws";
@@ -68,6 +66,16 @@ struct WsLevel {
 impl Hyperliquid {
     pub fn new(cfg: HyperliquidConfig) -> Self {
         Self { coins: cfg.coins }
+    }
+}
+
+impl Infos for Hyperliquid {
+    fn name(&self) -> String {
+        "hyperliquid".to_string()
+    }
+
+    fn symbols(&self) -> Vec<String> {
+        self.coins.clone()
     }
 }
 

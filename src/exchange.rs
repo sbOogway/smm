@@ -22,7 +22,16 @@ pub trait DataProvider {
     ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
 }
 
-pub trait Exchange: DataProvider + Executor + Send + Sync {}
+pub trait Infos {
+
+    fn name(&self) -> String;
+    fn symbols(&self) -> Vec<String>;
+    
+}
+
+pub trait Exchange: DataProvider + Executor + Send + Sync + Infos {
+    
+}
 
 pub fn new(name: &str, cfg: &AppConfig) -> Box<dyn Exchange> {
     match name {

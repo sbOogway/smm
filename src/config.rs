@@ -1,3 +1,4 @@
+use rust_decimal::Decimal;
 use serde::Deserialize;
 
 #[derive(Debug, Deserialize)]
@@ -46,9 +47,9 @@ pub struct StrategyConfigs {
 
 #[derive(Debug, Deserialize)]
 pub struct AvellanedaStoikovConfig {
-    pub gamma: f64,
-    pub q: f64,
-    pub sigma: f64,
+    pub γ: Decimal,
+    pub κ: Decimal,
+    pub σ: Decimal
 }
 
 impl AppConfig {
