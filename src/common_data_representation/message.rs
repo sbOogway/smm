@@ -1,6 +1,8 @@
+pub mod asmm_quote;
 pub mod bbo_update;
 pub mod trade_update;
 
+pub use asmm_quote::AsmmQuote;
 pub use bbo_update::BboUpdate;
 pub use trade_update::TradeUpdate;
 
@@ -9,6 +11,7 @@ pub enum Message {
     Empty,
     TradeUpdate(TradeUpdate),
     BboUpdate(BboUpdate),
+    AsmmQuote(AsmmQuote),
 }
 
 impl Message {

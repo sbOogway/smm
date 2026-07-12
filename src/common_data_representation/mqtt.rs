@@ -15,7 +15,7 @@ impl MqttPublisher {
         }
     }
 
-    async fn publish_price(
+    async fn publish_to_topic(
         client: &AsyncClient,
         config: &MqttConfig,
         exchange: &str,
@@ -47,12 +47,17 @@ impl MqttPublisher {
         while let Some(msg) = rx.recv().await {
             match msg {
                 Message::TradeUpdate(t) => {
-                    Self::publish_price(&client, &config, &t.exchange, &t.symbol, "price", t.price).await;
+                    Self::publish_to_topic(&client, &config, &t.exchange, &t.symbol, "price", t.price).await;
                 }
                 Message::BboUpdate(b) => {
-                    Self::publish_price(&client, &config, &b.exchange, &b.symbol, "bid", b.bid_price).await;
-                    Self::publish_price(&client, &config, &b.exchange, &b.symbol, "ask", b.ask_price).await;
-                    Self::publish_price(&client, &config, &b.exchange, &b.symbol, "mid_price", b.mid_price).await;
+                    Self::publish_to_topic(&client, &config, &b.exchange, &b.symbol, "bid", b.bid_price).await;
+                    Self::publish_to_topic(&client, &config, &b.exchange, &b.symbol, "ask", b.ask_price).await;
+                    Self::publish_to_topic(&client, &config, &b.exchange, &b.symbol, "mid_price", b.mid_price).await;
+                }
+                Message::AsmmQuote(q) => {
+                    Self::publish_to_topic(&client, &config, &q.exchange, &q.symbol, "reservation_price", q.reservation_price).await;
+                    Self::publish_to_topic(&client, &config, &q.exchange, &q.symbol, "asmm_bid_price", q.asmm_bid_price).await;
+                    Self::publish_to_topic(&client, &config, &q.exchange, &q.symbol, "asmm_ask_price", q.asmm_ask_price).await;
                 }
                 Message::Empty => {}
             }

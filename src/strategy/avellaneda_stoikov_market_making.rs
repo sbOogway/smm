@@ -16,12 +16,12 @@ use disruptor::{
 use futures_util::future;
 use rust_decimal::{
     Decimal, MathematicalOps,
-    prelude::{self, One},
+    prelude::{self, FromPrimitive, One},
 };
 use tokio::sync::mpsc::{self, Sender};
 
 use crate::{
-    common_data_representation::message::Message,
+    common_data_representation::message::{Message, asmm_quote::AsmmQuote},
     common_data_representation::mqtt::MqttPublisher,
     config::AppConfig,
     exchange::{self, Exchange},
@@ -79,7 +79,7 @@ impl AvellanedaStoikovMarketMaking {
                     );
 
                     let q_key = format!("{}_{}_q", exchange.name(), symbol);
-                    state.insert(q_key, Decimal::ZERO);
+                    state.insert(q_key, Decimal::from_f64(0.1).unwrap());
                 }
             }
         }
@@ -90,6 +90,7 @@ impl AvellanedaStoikovMarketMaking {
 
         match message {
             Message::Empty => todo!(),
+            Message::AsmmQuote(_) => todo!(),
             Message::TradeUpdate(update) => unsafe {
                 let state = &mut *STATE.0.get();
 
@@ -127,8 +128,11 @@ impl AvellanedaStoikovMarketMaking {
 
                     let reservation_price =
                         AvellanedaStoikovMarketMaking::reservation_price(mid_price, *q, *γ, *σ);
-                    
+
                     let optimal_spread = AvellanedaStoikovMarketMaking::optimal_spread(*γ, *κ);
+
+                    let asmm_bid_price = reservation_price - optimal_spread / Decimal::new(2, 0);
+                    let asmm_ask_price = reservation_price + optimal_spread / Decimal::new(2, 0);
 
                     state.insert(bid_price_key, update.bid_price);
                     state.insert(bid_size_key, update.bid_size);
@@ -137,12 +141,20 @@ impl AvellanedaStoikovMarketMaking {
                     state.insert(ask_size_key, update.ask_size);
 
                     state.insert(mid_price_key, mid_price);
-                }
 
-                if let Some(tx) = MQTT_TX.get() {
-                    let mut message_clone = update.clone();
-                    message_clone.mid_price = mid_price;
-                    let _ = tx.try_send(Message::BboUpdate(message_clone));
+                    if let Some(tx) = MQTT_TX.get() {
+                        let mut message_clone = update.clone();
+                        message_clone.mid_price = mid_price;
+                        let _ = tx.try_send(Message::BboUpdate(message_clone));
+
+                        let _ = tx.try_send(Message::AsmmQuote(AsmmQuote {
+                            exchange: update.exchange.clone(),
+                            symbol: update.symbol.clone(),
+                            reservation_price,
+                            asmm_bid_price: asmm_bid_price,
+                            asmm_ask_price: asmm_ask_price,
+                        }));
+                    }
                 }
             }
         }

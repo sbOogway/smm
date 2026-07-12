@@ -102,11 +102,36 @@
             "uid": "mqtt"
           },
           "topic": "mma/${exchange}/mid_price/${coin}"
+        },
+        {
+          "refId": "E",
+          "datasource": {
+            "type": "grafana-mqtt-datasource",
+            "uid": "mqtt"
+          },
+          "topic": "mma/${exchange}/reservation_price/${coin}"
+        },
+        {
+          "refId": "F",
+          "datasource": {
+            "type": "grafana-mqtt-datasource",
+            "uid": "mqtt"
+          },
+          "topic": "mma/${exchange}/asmm_bid_price/${coin}"
+        },
+        {
+          "refId": "G",
+          "datasource": {
+            "type": "grafana-mqtt-datasource",
+            "uid": "mqtt"
+          },
+          "topic": "mma/${exchange}/asmm_ask_price/${coin}"
         }
       ],
       "fieldConfig": {
         "defaults": {
           "unit": "none",
+          "decimals": 4,
           "custom": {
             "lineWidth": 2,
             "showPoints": "never"
