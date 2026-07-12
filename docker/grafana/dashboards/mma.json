@@ -1,0 +1,125 @@
+{
+  "title": "MMA Market Data",
+  "uid": "mma-market-data",
+  "tags": ["mma", "crypto"],
+  "schemaVersion": 39,
+  "version": 1,
+  "timezone": "browser",
+  "time": {
+    "from": "now-15m",
+    "to": "now"
+  },
+  "templating": {
+    "list": [
+      {
+        "name": "exchange",
+        "type": "custom",
+        "query": "hyperliquid",
+        "current": {
+          "value": "hyperliquid",
+          "text": "hyperliquid"
+        },
+        "options": [
+          {
+            "selected": true,
+            "value": "hyperliquid",
+            "text": "hyperliquid"
+          }
+        ],
+        "label": "Exchange"
+      },
+      {
+        "name": "coin",
+        "type": "custom",
+        "query": "ZEC, BTC, ETH, SOL",
+        "current": {
+          "value": "ZEC",
+          "text": "ZEC"
+        },
+        "options": [
+          {
+            "selected": true,
+            "value": "ZEC",
+            "text": "ZEC"
+          },
+          {
+            "value": "BTC",
+            "text": "BTC"
+          },
+          {
+            "value": "ETH",
+            "text": "ETH"
+          },
+          {
+            "value": "SOL",
+            "text": "SOL"
+          }
+        ],
+        "label": "Coin"
+      }
+    ]
+  },
+  "panels": [
+    {
+      "title": "Trade/Bid/Ask Prices",
+      "type": "timeseries",
+      "id": 1,
+      "gridPos": {
+        "h": 20,
+        "w": 36,
+        "x": 0,
+        "y": 0
+      },
+      "targets": [
+        {
+          "refId": "A",
+          "datasource": {
+            "type": "grafana-mqtt-datasource",
+            "uid": "mqtt"
+          },
+          "topic": "mma/${exchange}/price/${coin}"
+        },
+        {
+          "refId": "B",
+          "datasource": {
+            "type": "grafana-mqtt-datasource",
+            "uid": "mqtt"
+          },
+          "topic": "mma/${exchange}/bid/${coin}"
+        },
+        {
+          "refId": "C",
+          "datasource": {
+            "type": "grafana-mqtt-datasource",
+            "uid": "mqtt"
+          },
+          "topic": "mma/${exchange}/ask/${coin}"
+        }
+      ],
+      "fieldConfig": {
+        "defaults": {
+          "unit": "none",
+          "custom": {
+            "lineWidth": 2,
+            "showPoints": "never"
+          }
+        }
+      },
+      "options": {
+        "legend": {
+          "calcs": ["last"],
+          "displayMode": "list",
+          "placement": "bottom"
+        }
+      },
+      "transformations": [
+        {
+          "id": "extractFields",
+          "options": {
+            "byField": false
+          }
+        }
+      ]
+    }
+  ]
+}

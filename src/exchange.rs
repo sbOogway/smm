@@ -16,7 +16,7 @@ pub trait Executor {
 }
 
 pub trait DataProvider {
-    fn listen_trades(
+    fn listen(
         &self,
         disruptor: MultiProducer<Message, SingleConsumerBarrier>,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;

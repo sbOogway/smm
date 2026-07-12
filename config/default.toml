@@ -1,5 +1,5 @@
 [exchange.hyperliquid]
-coins = ["BTC", "ETH", "SOL"]
+coins = ["ZEC", "BTC", "ETH", "SOL"]
 
 [disruptor]
 buffer_size = 1024
@@ -8,6 +8,12 @@ buffer_size = 1024
 gamma = 0.1
 q = 0.0
 sigma = 0.02
+
+[mqtt]
+broker = "127.0.0.1"
+port = 1883
+topic_prefix = "mma"
+client_id = "mma-publisher"
 
 [runtime]
 exchanges = ["hyperliquid"]

@@ -9,7 +9,7 @@ use rust_decimal::Decimal;
 use std::str::FromStr;
 
 use crate::{
-    common_data_representation::message::{Message as AppMessage, PriceUpdate},
+    common_data_representation::message::{BboUpdate, Message as AppMessage, TradeUpdate},
     config::HyperliquidConfig,
     exchange::{DataProvider, Exchange, Executor},
 };
@@ -50,6 +50,21 @@ struct WsTrade {
     time: u64,
 }
 
+#[derive(Deserialize)]
+struct WsBbo {
+    coin: String,
+    time: u64,
+    bbo: [Option<WsLevel>; 2],
+}
+
+#[derive(Deserialize)]
+struct WsLevel {
+    #[serde(rename = "px")]
+    px: String,
+    #[serde(rename = "sz")]
+    sz: String,
+}
+
 impl Hyperliquid {
     pub fn new(cfg: HyperliquidConfig) -> Self {
         Self { coins: cfg.coins }
@@ -57,7 +72,7 @@ impl Hyperliquid {
 }
 
 impl DataProvider for Hyperliquid {
-    fn listen_trades(
+    fn listen(
         &self,
         mut disruptor: MultiProducer<AppMessage, SingleConsumerBarrier>,
     ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
@@ -67,18 +82,22 @@ impl DataProvider for Hyperliquid {
 
             tracing::info!(status = %response.status(), "connected");
 
-            for coin in &coins {
+            let sub_message = |kind: &str, coin: &str| -> Message {
                 let sub = Subscription {
                     method: "subscribe".into(),
                     subscription: SubscriptionParams {
-                        kind: "trades".into(),
-                        coin: coin.clone(),
+                        kind: kind.into(),
+                        coin: coin.into(),
                     },
                 };
-                ws_stream
-                    .send(Message::Text(serde_json::to_string(&sub).unwrap().into()))
-                    .await
-                    .unwrap();
+                Message::Text(serde_json::to_string(&sub).unwrap().into())
+            };
+
+            for coin in &coins {
+                ws_stream.send(sub_message("trades", coin)).await.unwrap();
+            }
+            for coin in &coins {
+                ws_stream.send(sub_message("bbo", coin)).await.unwrap();
             }
 
             loop {
@@ -93,40 +112,96 @@ impl DataProvider for Hyperliquid {
                         Err(_) => continue,
                     };
 
-                    if root.channel != "trades" {
-                        continue;
-                    }
+                    match root.channel.as_str() {
+                        "trades" => {
+                            let trades: Vec<WsTrade> = match serde_json::from_value(root.data) {
+                                Ok(t) => t,
+                                Err(_) => continue,
+                            };
 
-                    let trades: Vec<WsTrade> = match serde_json::from_value(root.data) {
-                        Ok(t) => t,
-                        Err(_) => continue,
-                    };
+                            for trade in trades {
+                                let price = match Decimal::from_str(&trade.price) {
+                                    Ok(p) => p,
+                                    Err(e) => {
+                                        tracing::warn!(raw = %trade.price, error = %e, "failed to parse price");
+                                        continue;
+                                    }
+                                };
+                                let size = match Decimal::from_str(&trade.size) {
+                                    Ok(s) => s,
+                                    Err(e) => {
+                                        tracing::warn!(raw = %trade.size, error = %e, "failed to parse size");
+                                        continue;
+                                    }
+                                };
+                                let trade_msg = AppMessage::TradeUpdate(TradeUpdate {
+                                    exchange: "hyperliquid".into(),
+                                    symbol: trade.coin,
+                                    side: trade.side,
+                                    price,
+                                    size,
+                                    time: trade.time,
+                                });
+                                disruptor.publish(|slot: &mut AppMessage| {
+                                    *slot = trade_msg;
+                                });
+                            }
+                        }
+                        "bbo" => {
+                            let bbo: WsBbo = match serde_json::from_value(root.data) {
+                                Ok(b) => b,
+                                Err(_) => continue,
+                            };
+                            tracing::debug!(coin = %bbo.coin, "bbo received");
 
-                    for trade in trades {
-                        let price = match Decimal::from_str(&trade.price) {
-                            Ok(p) => p,
-                            Err(e) => {
-                                tracing::warn!(raw = %trade.price, error = %e, "failed to parse price");
-                                continue;
-                            }
-                        };
-                        let size = match Decimal::from_str(&trade.size) {
-                            Ok(s) => s,
-                            Err(e) => {
-                                tracing::warn!(raw = %trade.size, error = %e, "failed to parse size");
-                                continue;
-                            }
-                        };
-                        disruptor.publish(|slot: &mut AppMessage| {
-                            *slot = AppMessage::PriceUpdate(PriceUpdate {
+                            let (bid, ask) = match bbo.bbo {
+                                [Some(b), Some(a)] => (b, a),
+                                _ => continue,
+                            };
+
+                            let bid_price = match Decimal::from_str(&bid.px) {
+                                Ok(p) => p,
+                                Err(e) => {
+                                    tracing::warn!(raw = %bid.px, error = %e, "failed to parse bid price");
+                                    continue;
+                                }
+                            };
+                            let bid_size = match Decimal::from_str(&bid.sz) {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    tracing::warn!(raw = %bid.sz, error = %e, "failed to parse bid size");
+                                    continue;
+                                }
+                            };
+                            let ask_price = match Decimal::from_str(&ask.px) {
+                                Ok(p) => p,
+                                Err(e) => {
+                                    tracing::warn!(raw = %ask.px, error = %e, "failed to parse ask price");
+                                    continue;
+                                }
+                            };
+                            let ask_size = match Decimal::from_str(&ask.sz) {
+                                Ok(s) => s,
+                                Err(e) => {
+                                    tracing::warn!(raw = %ask.sz, error = %e, "failed to parse ask size");
+                                    continue;
+                                }
+                            };
+
+                            let bbo_msg = AppMessage::BboUpdate(BboUpdate {
                                 exchange: "hyperliquid".into(),
-                                symbol: trade.coin,
-                                side: trade.side,
-                                price,
-                                size,
-                                time: trade.time,
+                                symbol: bbo.coin,
+                                bid_price,
+                                bid_size,
+                                ask_price,
+                                ask_size,
+                                time: bbo.time,
                             });
-                        });
+                            disruptor.publish(|slot: &mut AppMessage| {
+                                *slot = bbo_msg;
+                            });
+                        }
+                        _ => continue,
                     }
                 }
             }

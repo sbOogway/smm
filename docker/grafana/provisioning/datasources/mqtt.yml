@@ -1,0 +1,14 @@
+apiVersion: 1
+
+datasources:
+  - name: MQTT
+    type: grafana-mqtt-datasource
+    uid: mqtt
+    access: proxy
+    isDefault: false
+    jsonData:
+      uri: tcp://mosquitto:1883
+      clientID: grafana-mqtt
+      tlsAuth: false
+      tlsAuthWithCACert: false
+      tlsSkipVerify: false

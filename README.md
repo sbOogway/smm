@@ -7,8 +7,9 @@ framework for market making and arbitrage on various exchanges and assets
 ```mermaid
 flowchart TD
     subgraph strategy
-        subgraph execution 
-            
+        
+        subgraph execution [execution]
+            direction LR
             subgraph executor [executor]
             end
             subgraph execution_logic [execution_logic]
@@ -16,16 +17,27 @@ flowchart TD
             
         end
         subgraph common_data_representation
-            direction LR
+            disruptor
+            subgraph visualization
+                direction LR
+                mqtt
+                grafana
+            end
+
+            subgraph message
+                direction LR
             
-            subgraph turso_db [turso_db]
+
+                bbo_update
+                trade_update
             end
-            subgraph disruptor [disruptor]
-            end
+
+            
 
         end
 
         subgraph data_provider
+            direction LR
             hyperliquid_wss
             polymarket_wss
             betfair_wss
@@ -33,19 +45,21 @@ flowchart TD
         end
 
         
+
+        
     end
 
-    hyperliquid_wss --> disruptor
-    polymarket_wss --> disruptor
-    betfair_wss --> disruptor
-    binance_wss --> disruptor
+    data_provider --> message
+    common_data_representation --> visualization
 
-    disruptor --> turso_db
+    message --> disruptor
+    disruptor --> execution
 
-    turso_db --> execution_logic
+    mqtt <--> grafana
+
+    disruptor --> visualization
 
     execution_logic --> executor
-
 ```
 
 ## dependency graph
