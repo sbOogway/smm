@@ -27,6 +27,7 @@ pub struct HyperliquidConfig {
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct MqttConfig {
+    pub enabled: bool,
     pub broker: String,
     pub port: u16,
     pub topic_prefix: String,

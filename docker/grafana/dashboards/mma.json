@@ -94,6 +94,14 @@
             "uid": "mqtt"
           },
           "topic": "mma/${exchange}/ask/${coin}"
+        },
+        {
+          "refId": "D",
+          "datasource": {
+            "type": "grafana-mqtt-datasource",
+            "uid": "mqtt"
+          },
+          "topic": "mma/${exchange}/mid_price/${coin}"
         }
       ],
       "fieldConfig": {
