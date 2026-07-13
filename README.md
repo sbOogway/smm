@@ -3,6 +3,9 @@
 ## about
 framework for market making and arbitrage on various exchanges and assets
 
+## docs
+https://docs.rs/mma/latest/mma/index.html
+
 ## architecture
 ### data flow
 ```mermaid

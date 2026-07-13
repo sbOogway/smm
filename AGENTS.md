@@ -11,6 +11,7 @@
 - Use `tracing::info!` / `tracing::warn!` for logging, never `println`
 - No emojis in code
 - Follow existing patterns for imports, struct layout, trait impls
+- all lowercase everywhere: doc comments, commit messages, code identifiers, everything
 
 ## Build, test & check
 - `cargo check` — verify compilation

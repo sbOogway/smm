@@ -1,3 +1,10 @@
+//! implementation of the infamous market making strategy proposed by avellaneda and stoikov
+//! 
+//! this is the paper we take this strategy from 
+//! 
+//! <https://people.orie.cornell.edu/sfs33/LimitOrderBook.pdf>
+//! <https://doi.org/10.1080/14697680701381228>
+ 
 use std::{
     cell::UnsafeCell,
     collections::HashMap,
@@ -28,10 +35,6 @@ static EXCHANGES: OnceLock<Vec<Box<dyn Exchange>>> = OnceLock::new();
 
 static STATE: LazyLock<State> = LazyLock::new(|| State(UnsafeCell::new(HashMap::new())));
 
-/// this is the paper we take this strategy from 
-/// 
-/// <https://people.orie.cornell.edu/sfs33/LimitOrderBook.pdf>
-/// <https://doi.org/10.1080/14697680701381228>
 pub struct AvellanedaStoikovMarketMaking {}
 
 impl AvellanedaStoikovMarketMaking {

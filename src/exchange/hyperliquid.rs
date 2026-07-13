@@ -1,3 +1,7 @@
+//! hyperliquid exchange implementation.
+//!
+//! <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/>
+
 use std::{future::Future, pin::Pin};
 
 use disruptor::{MultiProducer, Producer, SingleConsumerBarrier};
@@ -14,18 +18,21 @@ use crate::{
     exchange::{DataProvider, Exchange, Executor, Infos},
 };
 
+/// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket>
 const WS_URL: &str = "wss://api.hyperliquid.xyz/ws";
 
 pub struct Hyperliquid {
     coins: Vec<String>,
 }
 
+/// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions#subscription-messages>
 #[derive(Serialize)]
 struct Subscription {
     method: String,
     subscription: SubscriptionParams,
 }
 
+/// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions>
 #[derive(Serialize)]
 struct SubscriptionParams {
     #[serde(rename = "type")]
@@ -33,12 +40,14 @@ struct SubscriptionParams {
     coin: String,
 }
 
+/// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions#data-formats>
 #[derive(Deserialize)]
 struct WsMessage {
     channel: String,
     data: serde_json::Value,
 }
 
+/// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions#9-trades>
 #[derive(Deserialize)]
 struct WsTrade {
     coin: String,
@@ -50,6 +59,7 @@ struct WsTrade {
     time: u64,
 }
 
+/// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions#19-bbo>
 #[derive(Deserialize)]
 struct WsBbo {
     coin: String,
@@ -57,6 +67,7 @@ struct WsBbo {
     bbo: [Option<WsLevel>; 2],
 }
 
+/// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions#data-type-definitions>
 #[derive(Deserialize)]
 struct WsLevel {
     #[serde(rename = "px")]
