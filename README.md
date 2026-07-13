@@ -31,12 +31,9 @@ flowchart TD
             subgraph message
                 direction LR
             
-
                 bbo_update
                 trade_update
             end
-
-            
 
         end
 
@@ -47,9 +44,6 @@ flowchart TD
             betfair_wss
             binance_wss
         end
-
-        
-
         
     end
 
@@ -97,8 +91,6 @@ flowchart TD
             ask_price
             bid_price
             mid_price
-
         end
     end
-
 ```
