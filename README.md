@@ -29,6 +29,7 @@ flowchart TD
             end
 
             subgraph memory_storage
+                direction LR
                 redis
                 hashmap
             end
@@ -47,6 +48,7 @@ flowchart TD
             polymarket_wss
             betfair_wss
             binance_wss
+            dydx_wss
         end
         
     end
@@ -71,17 +73,18 @@ flowchart TD
 flowchart TD
     subgraph dependency_graph
         config --> strategy
+        config --> exchange
 
         strategy --> exchange
         strategy --> common_data_representation
 
-        exchange --> data_provider
-        exchange --> executor
-        exchange --> message
+        exchange --> common_data_representation
 
-        common_data_representation --> disruptor
-        common_data_representation --> turso_db
         common_data_representation --> message
+        common_data_representation --> mqtt
+        common_data_representation --> memory_storage
+
+        memory_storage --> redis
     end
 ```
 
