@@ -34,7 +34,6 @@ flowchart TD
                 bbo_update
                 trade_update
             end
-
         end
 
         subgraph data_provider
@@ -82,6 +81,11 @@ flowchart TD
 > [!tip]
 > use `cargo test` to verify that there are no circular dependencies
 
+### services
+flowchart TD
+    mma <--> redis
+    mma --> mqtt
+    mqtt --> grafana
 ### strategies
 #### avellaneda stoikov market making
 ```mermaid
