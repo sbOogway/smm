@@ -28,6 +28,11 @@ flowchart TD
                 grafana
             end
 
+            subgraph memory_storage
+                redis
+                hashmap
+            end
+
             subgraph message
                 direction LR
             
@@ -51,8 +56,10 @@ flowchart TD
 
     message --> disruptor
     disruptor --> execution
+    disruptor --> memory_storage
+    memory_storage --> execution
 
-    mqtt <--> grafana
+    mqtt --> grafana
 
     disruptor --> visualization
 
@@ -82,10 +89,15 @@ flowchart TD
 > use `cargo test` to verify that there are no circular dependencies
 
 ### services
+```mermaid
 flowchart TD
     mma <--> redis
     mma --> mqtt
     mqtt --> grafana
+    mma <--> pgsql
+    pgsql --> grafana
+```
+
 ### strategies
 #### avellaneda stoikov market making
 ```mermaid

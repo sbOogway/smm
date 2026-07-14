@@ -10,6 +10,12 @@ subaccount_number = 0
 chain_id = "dydx-mainnet-1"
 mnemonic = "mirror actor skill push coach wait confirm orchard lunch mobile athlete gossip awake miracle matter bus reopen team ladder lazy list timber render wait"
 
+[memory_storage]
+backend = "hashmap"
+
+[memory_storage.redis]
+socket_path = "/data/redis.sock"
+
 [disruptor]
 buffer_size = 1024
 

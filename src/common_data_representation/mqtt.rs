@@ -1,5 +1,5 @@
 //! `mqtt` module is responsible to publish data to the broker
-//! 
+//!
 //! the current design of the system implies that data is only published and never read.
 
 use rumqttc::{AsyncClient, EventLoop, MqttOptions, QoS};

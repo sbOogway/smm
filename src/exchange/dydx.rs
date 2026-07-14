@@ -8,8 +8,8 @@ use std::{future::Future, pin::Pin, sync::OnceLock};
 use bigdecimal::BigDecimal as BigDec;
 use disruptor::{MultiProducer, Producer, SingleConsumerBarrier};
 use dydx::indexer::{
-    IndexerClient, IndexerConfig, OrderSide, OrdersMessage, RestConfig, SockConfig,
-    Subaccount, SubaccountsMessage, Ticker, TradesMessage,
+    IndexerClient, IndexerConfig, OrderSide, OrdersMessage, RestConfig, SockConfig, Subaccount,
+    SubaccountsMessage, Ticker, TradesMessage,
 };
 use dydx::node::Wallet;
 use rust_decimal::Decimal;

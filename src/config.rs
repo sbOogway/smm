@@ -11,6 +11,7 @@ pub struct AppConfig {
     pub strategy: StrategyConfigs,
     pub disruptor: DisruptorConfig,
     pub mqtt: MqttConfig,
+    pub memory_storage: MemoryStorageConfig,
 }
 
 #[derive(Debug, Deserialize)]
@@ -39,6 +40,17 @@ pub struct DydxConfig {
     pub mnemonic: String,
     pub subaccount_number: u32,
     pub chain_id: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct MemoryStorageConfig {
+    pub backend: String,
+    pub redis: Option<RedisConfig>,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct RedisConfig {
+    pub socket_path: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]

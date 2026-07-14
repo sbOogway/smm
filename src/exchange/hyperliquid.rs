@@ -97,7 +97,12 @@ impl Hyperliquid {
         }
     }
 
-    async fn connect(&self) -> (WebSocketStream<MaybeTlsStream<TcpStream>>, mpsc::Receiver<String>) {
+    async fn connect(
+        &self,
+    ) -> (
+        WebSocketStream<MaybeTlsStream<TcpStream>>,
+        mpsc::Receiver<String>,
+    ) {
         let (tx, rx) = mpsc::channel(256);
         WS_TX.set(tx).ok();
 
@@ -303,7 +308,9 @@ mod tests {
 
     #[tokio::test]
     async fn connect_and_receive_trades() {
-        let (mut ws_stream, response) = connect_async(WS_URL_MAINNET).await.expect("failed to connect");
+        let (mut ws_stream, response) = connect_async(WS_URL_MAINNET)
+            .await
+            .expect("failed to connect");
 
         assert!(
             response.status().is_success() || response.status().as_u16() == 101,
@@ -361,7 +368,9 @@ mod tests {
 
     #[tokio::test]
     async fn ping_latency_under_500ms() {
-        let (mut ws_stream, response) = connect_async(WS_URL_MAINNET).await.expect("failed to connect");
+        let (mut ws_stream, response) = connect_async(WS_URL_MAINNET)
+            .await
+            .expect("failed to connect");
 
         assert!(
             response.status().is_success() || response.status().as_u16() == 101,
@@ -404,7 +413,9 @@ mod tests {
 
     #[tokio::test]
     async fn balance_of_request() {
-        let (mut ws_stream, response) = connect_async(WS_URL_MAINNET).await.expect("failed to connect");
+        let (mut ws_stream, response) = connect_async(WS_URL_MAINNET)
+            .await
+            .expect("failed to connect");
 
         assert!(
             response.status().is_success() || response.status().as_u16() == 101,
@@ -425,7 +436,9 @@ mod tests {
         });
 
         ws_stream
-            .send(Message::Text(serde_json::to_string(&request).unwrap().into()))
+            .send(Message::Text(
+                serde_json::to_string(&request).unwrap().into(),
+            ))
             .await
             .expect("failed to send post request");
 
