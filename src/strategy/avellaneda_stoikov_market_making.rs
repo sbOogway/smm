@@ -1,16 +1,11 @@
 //! implementation of the infamous market making strategy proposed by avellaneda and stoikov
-//! 
-//! this is the paper we take this strategy from 
-//! 
+//!
+//! this is the paper we take this strategy from
+//!
 //! <https://people.orie.cornell.edu/sfs33/LimitOrderBook.pdf>
 //! <https://doi.org/10.1080/14697680701381228>
- 
-use std::{
-    cell::UnsafeCell,
-    collections::HashMap,
-    sync::{LazyLock, OnceLock},
-    time::Duration,
-};
+
+use std::{sync::OnceLock, time::Duration};
 
 use async_trait::async_trait;
 use disruptor::{MultiProducer, ProcessorSettings, SingleConsumerBarrier, Sleep};
@@ -19,6 +14,8 @@ use rust_decimal::{Decimal, MathematicalOps, prelude::FromPrimitive};
 use tokio::sync::mpsc::{self, Sender};
 
 use crate::{
+    common_data_representation::memory_storage::MemoryStorage,
+    common_data_representation::memory_storage::new_storage,
     common_data_representation::message::{Message, asmm_quote::AsmmQuote},
     common_data_representation::mqtt::MqttPublisher,
     config::AppConfig,
@@ -32,8 +29,7 @@ static DISRUPTOR_PRODUCER: OnceLock<MultiProducer<Message, SingleConsumerBarrier
     OnceLock::new();
 static MQTT_TX: OnceLock<Sender<Message>> = OnceLock::new();
 static EXCHANGES: OnceLock<Vec<Box<dyn Exchange>>> = OnceLock::new();
-
-static STATE: LazyLock<State> = LazyLock::new(|| State(UnsafeCell::new(HashMap::new())));
+static STORAGE: OnceLock<Box<dyn MemoryStorage<Decimal>>> = OnceLock::new();
 
 pub struct AvellanedaStoikovMarketMaking {}
 
@@ -50,69 +46,67 @@ impl AvellanedaStoikovMarketMaking {
     }
 
     fn init_state(cfg: &AppConfig) {
-        unsafe {
-            let state = &mut *STATE.0.get();
+        let state = &**STORAGE.get().expect("storage not initialized");
 
-            for exchange in EXCHANGES.get().unwrap() {
-                for symbol in exchange.symbols() {
-                    let γ_key = format!("{}_{}_γ", exchange.name(), symbol);
-                    state.insert(
-                        γ_key,
-                        cfg.strategy
-                            .avellaneda_stoikov_market_making
-                            .as_ref()
-                            .unwrap()
-                            .γ,
-                    );
+        for exchange in EXCHANGES.get().unwrap() {
+            for symbol in exchange.symbols() {
+                let γ_key = format!("{}_{}_γ", exchange.name(), symbol);
+                state.set(
+                    γ_key,
+                    cfg.strategy
+                        .avellaneda_stoikov_market_making
+                        .as_ref()
+                        .unwrap()
+                        .γ,
+                );
 
-                    let σ_key = format!("{}_{}_σ", exchange.name(), symbol);
-                    state.insert(
-                        σ_key,
-                        cfg.strategy
-                            .avellaneda_stoikov_market_making
-                            .as_ref()
-                            .unwrap()
-                            .σ,
-                    );
+                let σ_key = format!("{}_{}_σ", exchange.name(), symbol);
+                state.set(
+                    σ_key,
+                    cfg.strategy
+                        .avellaneda_stoikov_market_making
+                        .as_ref()
+                        .unwrap()
+                        .σ,
+                );
 
-                    let κ_key = format!("{}_{}_κ", exchange.name(), symbol);
-                    state.insert(
-                        κ_key,
-                        cfg.strategy
-                            .avellaneda_stoikov_market_making
-                            .as_ref()
-                            .unwrap()
-                            .κ,
-                    );
+                let κ_key = format!("{}_{}_κ", exchange.name(), symbol);
+                state.set(
+                    κ_key,
+                    cfg.strategy
+                        .avellaneda_stoikov_market_making
+                        .as_ref()
+                        .unwrap()
+                        .κ,
+                );
 
-                    let q_key = format!("{}_{}_q", exchange.name(), symbol);
-                    state.insert(q_key, Decimal::from_f64(0.1).unwrap());
-                }
+                let q_key = format!("{}_{}_q", exchange.name(), symbol);
+                state.set(q_key, Decimal::from_f64(0.1).unwrap());
             }
         }
     }
 
-    /// `disruptor` callback 
-    /// 
-    /// we can afford `unsafe` code here because the `disruptor` architecture ensures that each `Message` is 
+    /// `disruptor` callback
+    ///
+    /// we can afford `unsafe` code here because the `disruptor` architecture ensures that each `Message` is
     /// processed sequentially
     fn handle_message(message: &Message) {
         tracing::debug!("{:#?}", message);
 
+        let state = &**STORAGE.get().expect("storage not initialized");
+
         match message {
             Message::Empty => todo!(),
             Message::AsmmQuote(_) => todo!(),
-            Message::TradeUpdate(update) => unsafe {
-                let state = &mut *STATE.0.get();
-
+            Message::TradeUpdate(update) => {
                 let key = format!("{}_{}", update.exchange, update.symbol);
 
-                state.insert(key, update.price);
+                state.set(key, update.price);
 
                 if let Some(tx) = MQTT_TX.get() {
                     let _ = tx.try_send(message.clone());
                 }
-            },
+            }
             Message::BboUpdate(update) => {
                 let mid_price = (update.bid_price + update.ask_price) / Decimal::new(2, 0);
 
@@ -124,60 +118,55 @@ impl AvellanedaStoikovMarketMaking {
 
                 let mid_price_key = format!("{}_{}_mid_price", update.exchange, update.symbol);
 
-                unsafe {
-                    let state = &mut *STATE.0.get();
+                let q_key = format!("{}_{}_q", update.exchange, update.symbol);
+                let γ_key = format!("{}_{}_γ", update.exchange, update.symbol);
+                let σ_key = format!("{}_{}_σ", update.exchange, update.symbol);
+                let κ_key = format!("{}_{}_κ", update.exchange, update.symbol);
 
-                    let q_key = format!("{}_{}_q", update.exchange, update.symbol);
-                    let γ_key = format!("{}_{}_γ", update.exchange, update.symbol);
-                    let σ_key = format!("{}_{}_σ", update.exchange, update.symbol);
-                    let κ_key = format!("{}_{}_κ", update.exchange, update.symbol);
+                let q = state.get(&q_key).unwrap();
+                let γ = state.get(&γ_key).unwrap();
+                let σ = state.get(&σ_key).unwrap();
+                let κ = state.get(&κ_key).unwrap();
 
-                    let q = state.get(&q_key).unwrap();
-                    let γ = state.get(&γ_key).unwrap();
-                    let σ = state.get(&σ_key).unwrap();
-                    let κ = state.get(&κ_key).unwrap();
+                let reservation_price =
+                    AvellanedaStoikovMarketMaking::reservation_price(mid_price, q, γ, σ);
 
-                    let reservation_price =
-                        AvellanedaStoikovMarketMaking::reservation_price(mid_price, *q, *γ, *σ);
+                let optimal_spread = AvellanedaStoikovMarketMaking::optimal_spread(γ, κ);
 
-                    let optimal_spread = AvellanedaStoikovMarketMaking::optimal_spread(*γ, *κ);
+                let asmm_bid_price = reservation_price - optimal_spread / Decimal::new(2, 0);
+                let asmm_ask_price = reservation_price + optimal_spread / Decimal::new(2, 0);
 
-                    let asmm_bid_price = reservation_price - optimal_spread / Decimal::new(2, 0);
-                    let asmm_ask_price = reservation_price + optimal_spread / Decimal::new(2, 0);
+                state.set(bid_price_key, update.bid_price);
+                state.set(bid_size_key, update.bid_size);
 
-                    state.insert(bid_price_key, update.bid_price);
-                    state.insert(bid_size_key, update.bid_size);
+                state.set(ask_price_key, update.ask_price);
+                state.set(ask_size_key, update.ask_size);
 
-                    state.insert(ask_price_key, update.ask_price);
-                    state.insert(ask_size_key, update.ask_size);
+                state.set(mid_price_key, mid_price);
 
-                    state.insert(mid_price_key, mid_price);
+                if let Some(tx) = MQTT_TX.get() {
+                    let mut message_clone = update.clone();
+                    message_clone.mid_price = mid_price;
+                    let _ = tx.try_send(Message::BboUpdate(message_clone));
 
-                    if let Some(tx) = MQTT_TX.get() {
-                        let mut message_clone = update.clone();
-                        message_clone.mid_price = mid_price;
-                        let _ = tx.try_send(Message::BboUpdate(message_clone));
-
-                        let _ = tx.try_send(Message::AsmmQuote(AsmmQuote {
-                            exchange: update.exchange.clone(),
-                            symbol: update.symbol.clone(),
-                            reservation_price,
-                            asmm_bid_price: asmm_bid_price,
-                            asmm_ask_price: asmm_ask_price,
-                        }));
-                    }
+                    let _ = tx.try_send(Message::AsmmQuote(AsmmQuote {
+                        exchange: update.exchange.clone(),
+                        symbol: update.symbol.clone(),
+                        reservation_price,
+                        asmm_bid_price,
+                        asmm_ask_price,
+                    }));
                 }
             }
         }
     }
 }
-struct State(UnsafeCell<HashMap<String, Decimal>>);
-unsafe impl Sync for State {}
-
 
 #[async_trait]
 impl Strategy for AvellanedaStoikovMarketMaking {
     fn new(cfg: &AppConfig) -> Self {
+        let _ = STORAGE.set(new_storage(&cfg.memory_storage));
+
         if cfg.mqtt.enabled {
             let (mqtt_tx, mqtt_rx) = mpsc::channel(256);
             tokio::spawn(MqttPublisher::run(cfg.mqtt.clone(), mqtt_rx));

@@ -1,4 +1,4 @@
-//! `strategy` is the main component of the package. It is responsible for coordinating the exchanges, 
+//! `strategy` is the main component of the package. It is responsible for coordinating the exchanges,
 //! sending `Message`s into the disruptor and execute the core logic.
 
 use crate::config::AppConfig;
