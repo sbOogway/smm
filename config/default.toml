@@ -3,6 +3,13 @@ coins = ["ZEC", "BTC", "ETH", "SOL"]
 mainnet = true
 address = "0x83473ff587C2aeE4a55Fb3c396bD981D469f4236"
 
+[exchange.dydx]
+tickers = ["ETH-USD", "BTC-USD"]
+indexer_ws_endpoint = "wss://indexer.dydx.trade/v4/ws"
+subaccount_number = 0
+chain_id = "dydx-mainnet-1"
+mnemonic = "mirror actor skill push coach wait confirm orchard lunch mobile athlete gossip awake miracle matter bus reopen team ladder lazy list timber render wait"
+
 [disruptor]
 buffer_size = 1024
 
@@ -19,5 +26,5 @@ topic_prefix = "mma"
 client_id = "mma-publisher"
 
 [runtime]
-exchanges = ["hyperliquid"]
+exchanges = ["dydx"]
 strategy = "avellaneda_stoikov_market_making"

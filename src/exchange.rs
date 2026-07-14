@@ -3,15 +3,16 @@
 //! over various protocols (e.g. Websocket, FIX), sending, deleting and modyfing orders and checking
 //! balances.
 
+pub mod dydx;
 pub mod hyperliquid;
 
 use std::{future::Future, pin::Pin};
 
 use disruptor::{MultiProducer, SingleConsumerBarrier};
-use rust_decimal::Decimal;
 
 use crate::config::AppConfig;
 
+use self::dydx::Dydx;
 use self::hyperliquid::Hyperliquid;
 
 use super::common_data_representation::message::Message;
@@ -44,6 +45,12 @@ pub fn new(name: &str, cfg: &AppConfig) -> Box<dyn Exchange> {
                 .hyperliquid
                 .clone()
                 .expect("missing [exchange.hyperliquid] config"),
+        )),
+        "dydx" => Box::new(Dydx::new(
+            cfg.exchange
+                .dydx
+                .clone()
+                .expect("missing [exchange.dydx] config"),
         )),
         other => panic!("unknown exchange: {other}"),
     }

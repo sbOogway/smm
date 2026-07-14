@@ -22,6 +22,7 @@ pub struct RuntimeConfig {
 #[derive(Debug, Deserialize)]
 pub struct ExchangeConfigs {
     pub hyperliquid: Option<HyperliquidConfig>,
+    pub dydx: Option<DydxConfig>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -29,6 +30,15 @@ pub struct HyperliquidConfig {
     pub coins: Vec<String>,
     pub mainnet: bool,
     pub address: String,
+}
+
+#[derive(Clone, Debug, Deserialize)]
+pub struct DydxConfig {
+    pub tickers: Vec<String>,
+    pub indexer_ws_endpoint: String,
+    pub mnemonic: String,
+    pub subaccount_number: u32,
+    pub chain_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize)]
