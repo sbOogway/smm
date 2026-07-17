@@ -10,7 +10,7 @@ use std::{sync::OnceLock, time::Duration};
 use async_trait::async_trait;
 use disruptor::{MultiProducer, ProcessorSettings, SingleConsumerBarrier, Sleep};
 use futures_util::future;
-use rust_decimal::{Decimal, MathematicalOps, prelude::FromPrimitive};
+use rust_decimal::{Decimal, MathematicalOps};
 use tokio::sync::mpsc::{self, Sender};
 
 use crate::{
@@ -24,7 +24,7 @@ use crate::{
     },
     exchange::{self, Exchange},
     strategy::Strategy,
-    types::message::{Message, asmm_quote::AsmmQuote},
+    exchange::types::message::{Message, asmm_quote::AsmmQuote},
 };
 
 /// i decided to have these objects static to avoid lifetime headaches and complains
@@ -105,13 +105,8 @@ impl AvellanedaStoikovMarketMaking {
             Message::BalanceUpdate(update) => {
                 tracing::info!("{:#?}", update);
 
-                state.set(format!("{}_equity", update.exchange), update.equity);
-
-
-                for (symbol, position) in &update.positions {
-                    let q_key = format!("{}_{}_q", update.exchange, symbol);
-                    state.set(q_key, position.value);
-                }
+                let key = format!("{}_{}_q", update.exchange, update.symbol);
+                state.set(key, update.quantity);
             }
             Message::Empty => todo!(),
             Message::AsmmQuote(_) => todo!(),

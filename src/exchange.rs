@@ -4,25 +4,39 @@
 //! balances.
 
 pub mod dydx;
-pub mod hyperliquid;
+// pub mod hyperliquid;
+pub mod types;
 
 use std::{future::Future, pin::Pin};
 
 use disruptor::{MultiProducer, SingleConsumerBarrier};
+use rust_decimal::Decimal;
 
 use crate::config::AppConfig;
+use crate::exchange::types::message::Message;
+use types::portfolio::Portfolio as PortfolioType;
 
 use self::dydx::Dydx;
-use self::hyperliquid::Hyperliquid;
+// use self::hyperliquid::Hyperliquid;
 
-use super::types::message::Message;
-use super::types::portfolio::Portfolio;
+pub trait Portfolio {
+    fn get_portfolio(&self) -> PortfolioType;
 
-pub trait Executor {
+    fn balance_of(&self, symbol: &str) -> Decimal {
+        let portfolio = self.get_portfolio();
+        portfolio
+            .positions
+            .iter()
+            .find(|&position| position.symbol == symbol)
+            .unwrap()
+            .quantity
+    }
+}
+
+pub trait Orders {
     fn create_order(&self);
     fn update_order(&self);
     fn cancel_order(&self);
-    fn get_portfolio(&self) -> Portfolio;
 }
 
 pub trait DataProvider {
@@ -37,16 +51,16 @@ pub trait Infos {
     fn symbols(&self) -> Vec<String>;
 }
 
-pub trait Exchange: DataProvider + Executor + Send + Sync + Infos {}
+pub trait Exchange: DataProvider + Portfolio + Orders + Send + Sync + Infos {}
 
 pub fn new(name: &str, cfg: &AppConfig) -> Box<dyn Exchange> {
     match name {
-        "hyperliquid" => Box::new(Hyperliquid::new(
-            cfg.exchange
-                .hyperliquid
-                .clone()
-                .expect("missing [exchange.hyperliquid] config"),
-        )),
+        // "hyperliquid" => Box::new(Hyperliquid::new(
+        //     cfg.exchange
+        //         .hyperliquid
+        //         .clone()
+        //         .expect("missing [exchange.hyperliquid] config"),
+        // )),
         "dydx" => Box::new(Dydx::new(
             cfg.exchange
                 .dydx

@@ -17,9 +17,8 @@ use std::str::FromStr;
 
 use crate::{
     config::HyperliquidConfig,
-    exchange::{DataProvider, Exchange, Executor, Infos},
-    types::message::{BboUpdate, Message as AppMessage, TradeUpdate},
-    types::portfolio::Portfolio,
+    exchange::{DataProvider, Exchange, Infos, Orders, Portfolio},
+    exchange::types::message::{BboUpdate, Message as AppMessage, TradeUpdate},
 };
 
 /// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket>
@@ -32,7 +31,7 @@ pub struct Hyperliquid {
     coins: Vec<String>,
     ws_url: String,
     address: String,
-    portfolio: Arc<Mutex<Portfolio>>,
+    portfolio: Arc<Mutex<crate::exchange::types::portfolio::Portfolio>>,
 }
 
 /// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions#subscription-messages>
@@ -97,7 +96,7 @@ impl Hyperliquid {
             coins: cfg.coins,
             ws_url: ws_url.to_string(),
             address: cfg.address.clone(),
-            portfolio: Arc::new(Mutex::new(Portfolio {
+            portfolio: Arc::new(Mutex::new(crate::types::portfolio::Portfolio {
                 equity: Decimal::ZERO,
                 balances: std::collections::HashMap::new(),
                 positions: std::collections::HashMap::new(),
@@ -273,7 +272,13 @@ impl DataProvider for Hyperliquid {
     }
 }
 
-impl Executor for Hyperliquid {
+impl Portfolio for Hyperliquid {
+    fn get_portfolio(&self) -> crate::types::portfolio::Portfolio {
+        self.portfolio.lock().unwrap().clone()
+    }
+}
+
+impl Orders for Hyperliquid {
     fn create_order(&self) {
         todo!()
     }
@@ -284,10 +289,6 @@ impl Executor for Hyperliquid {
 
     fn cancel_order(&self) {
         todo!()
-    }
-
-    fn get_portfolio(&self) -> Portfolio {
-        self.portfolio.lock().unwrap().clone()
     }
 }
 

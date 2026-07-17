@@ -2,7 +2,6 @@
 //!
 //! <https://docs.dydx.xyz>
 
-use std::collections::HashMap;
 use std::str::FromStr;
 use std::sync::{Arc, Mutex};
 use std::{future::Future, pin::Pin};
@@ -10,28 +9,33 @@ use std::{future::Future, pin::Pin};
 use bigdecimal::BigDecimal as BigDec;
 use disruptor::{MultiProducer, Producer, SingleConsumerBarrier};
 use dydx::indexer::{
-    IndexerClient, IndexerConfig, OrderSide, OrdersMessage, PositionSide, RestConfig, SockConfig,
-    Subaccount, SubaccountsMessage, Ticker, TradesMessage,
+    IndexerClient, IndexerConfig, OrderSide, OrdersMessage, RestConfig, SockConfig, Subaccount,
+    SubaccountsMessage, Ticker, TradesMessage,
 };
 use dydx::node::Wallet;
 use rust_decimal::Decimal;
 
+use crate::exchange::types::Side::{self, Long, Short};
 use crate::{
     config::DydxConfig,
-    exchange::{DataProvider, Exchange, Executor, Infos},
-    types::message::{
-        BalanceUpdate, BboUpdate, Message as AppMessage, PositionInfo, TradeUpdate,
-    },
-    types::portfolio::Portfolio,
+    exchange::types::message::{BboUpdate, Message as AppMessage, PositionUpdate, TradeUpdate},
+    exchange::{DataProvider, Exchange, Infos, Orders, Portfolio},
 };
 
-fn bd_to_dec(bd: &BigDec) -> Decimal {
+fn big_decimal_to_decimal(bd: &BigDec) -> Decimal {
     Decimal::from_str(&bd.to_string()).expect("bigdecimal to decimal conversion")
+}
+
+fn dydx_side_to_side(side: OrderSide) -> Side {
+    match side {
+        OrderSide::Buy => Long,
+        OrderSide::Sell => Short,
+    }
 }
 
 pub struct Dydx {
     tickers: Vec<String>,
-    portfolio: Arc<Mutex<Portfolio>>,
+    portfolio: Arc<Mutex<crate::exchange::types::portfolio::Portfolio>>,
     config: DydxConfig,
 }
 
@@ -39,10 +43,11 @@ impl Dydx {
     pub fn new(cfg: DydxConfig) -> Self {
         Self {
             tickers: cfg.tickers.clone(),
-            portfolio: Arc::new(Mutex::new(Portfolio {
+            portfolio: Arc::new(Mutex::new(crate::exchange::types::portfolio::Portfolio {
                 equity: Decimal::ZERO,
-                balances: HashMap::new(),
-                positions: HashMap::new(),
+                balances: Vec::new(),
+                positions: Vec::new(),
+                orders: Vec::new()
             })),
             config: cfg,
         }
@@ -58,17 +63,14 @@ async fn handle_trades_feed(
         match msg {
             TradesMessage::Initial(init) => {
                 for trade in init.contents.trades {
-                    let price = bd_to_dec(&trade.price.0);
-                    let size = bd_to_dec(&trade.size.0);
-                    let side = match trade.side {
-                        OrderSide::Buy => "buy",
-                        OrderSide::Sell => "sell",
-                    };
+                    let price = big_decimal_to_decimal(&trade.price.0);
+                    let size = big_decimal_to_decimal(&trade.size.0);
+                    let side = dydx_side_to_side(trade.side);
                     let time = trade.created_at.timestamp() as u64;
                     let msg = AppMessage::TradeUpdate(TradeUpdate {
                         exchange: "dydx".into(),
                         symbol: ticker.clone(),
-                        side: side.into(),
+                        side: side,
                         price,
                         size,
                         time,
@@ -81,12 +83,9 @@ async fn handle_trades_feed(
             TradesMessage::Update(upd) => {
                 for contents in upd.contents {
                     for trade in contents.trades {
-                        let price = bd_to_dec(&trade.price.0);
-                        let size = bd_to_dec(&trade.size.0);
-                        let side = match trade.side {
-                            OrderSide::Buy => "buy",
-                            OrderSide::Sell => "sell",
-                        };
+                        let price = big_decimal_to_decimal(&trade.price.0);
+                        let size = big_decimal_to_decimal(&trade.size.0);
+                        let side = dydx_side_to_side(trade.side);
                         let time = trade.created_at.timestamp() as u64;
                         let msg = AppMessage::TradeUpdate(TradeUpdate {
                             exchange: "dydx".into(),
@@ -126,8 +125,8 @@ async fn handle_orders_feed(
         };
 
         for level in &bids {
-            let price = bd_to_dec(&level.price.0);
-            let size = bd_to_dec(&level.size.0);
+            let price = big_decimal_to_decimal(&level.price.0);
+            let size = big_decimal_to_decimal(&level.size.0);
             if size.is_zero() && price == best_bid_price {
                 best_bid_price = Decimal::ZERO;
                 best_bid_size = Decimal::ZERO;
@@ -138,8 +137,8 @@ async fn handle_orders_feed(
         }
 
         for level in &asks {
-            let price = bd_to_dec(&level.price.0);
-            let size = bd_to_dec(&level.size.0);
+            let price = big_decimal_to_decimal(&level.price.0);
+            let size = big_decimal_to_decimal(&level.size.0);
             if size.is_zero() && price == best_ask_price {
                 best_ask_price = Decimal::ZERO;
                 best_ask_size = Decimal::ZERO;
@@ -178,129 +177,35 @@ async fn handle_orders_feed(
 async fn handle_subaccounts_feed(
     mut disruptor: MultiProducer<AppMessage, SingleConsumerBarrier>,
     mut feed: dydx::indexer::Feed<SubaccountsMessage>,
-    portfolio: Arc<Mutex<Portfolio>>,
 ) {
-    let mut address = String::new();
     while let Some(msg) = feed.recv().await {
+        tracing::info!("{:#?}", msg);
         match msg {
             SubaccountsMessage::Initial(init) => {
-                let subaccount = &init.contents.subaccount;
-                tracing::info!("{subaccount:#?}");
-
-                let mut balances = HashMap::new();
-                for (ticker, pos) in &subaccount.asset_positions {
-                    let balance = bd_to_dec(&pos.size.0);
-                    balances.insert(ticker.0.clone(), balance);
-                }
-
-                let mut positions = HashMap::new();
-                for (market, pos) in &subaccount.open_perpetual_positions {
-                    let size = match pos.side {
-                        PositionSide::Short => -bd_to_dec(&pos.size.0),
-                        PositionSide::Long => bd_to_dec(&pos.size.0),
-                    };
-                    let entry_price = bd_to_dec(&pos.entry_price.0);
-                    let realized_pnl = bd_to_dec(&pos.realized_pnl);
-                    let unrealized_pnl = bd_to_dec(&pos.unrealized_pnl);
-                    let value = size * entry_price + realized_pnl + unrealized_pnl;
-                    positions.insert(
-                        market.0.clone(),
-                        PositionInfo {
-                            size,
-                            entry_price,
-                            realized_pnl,
-                            unrealized_pnl,
-                            net_funding: bd_to_dec(&pos.net_funding),
-                            value,
-                        },
-                    );
-                }
-
-                let cash: Decimal = balances.values().sum();
-                let position_value: Decimal = positions.values().map(|p| p.value).sum();
-                let equity = cash + position_value;
-
-                {
-                    let mut p = portfolio.lock().unwrap();
-                    p.equity = equity;
-                    p.balances = balances.clone();
-                    p.positions = positions.clone();
-                }
-
-                address = String::from(subaccount.address.clone());
-
-                let update = BalanceUpdate {
-                    exchange: "dydx".into(),
-                    address: address.clone(),
-                    equity,
-                    free_collateral: cash,
-                    balances: balances.clone(),
-                    positions: positions.clone(),
-                };
-                tracing::info!("{update:#?}");
-                disruptor.publish(|slot: &mut AppMessage| {
-                    *slot = AppMessage::BalanceUpdate(update);
+                let _total_value = big_decimal_to_decimal(&init.contents.subaccount.equity);
+                let _total_value_update = disruptor.publish(|_message| {
+                    // *message = tot
                 });
+
+                init.contents
+                    .subaccount
+                    .open_perpetual_positions
+                    .iter()
+                    .for_each(|(ticker, position)| {
+                        let balance_update = AppMessage::BalanceUpdate(PositionUpdate {
+                            exchange: "dydx".into(),
+                            symbol: ticker.0.clone(),
+                            quantity: big_decimal_to_decimal(&position.size),
+                            average_price: big_decimal_to_decimal(&position.entry_price),
+                            side: Long,
+                        });
+                        disruptor.publish(|message: &mut AppMessage| {
+                            *message = balance_update;
+                        });
+                    });
             }
-            SubaccountsMessage::Update(upd) => {
-                let mut portfolio_guard = portfolio.lock().unwrap();
-                for content in &upd.contents {
-                    tracing::info!("{content:#?}");
-                    if let Some(asset_positions) = &content.asset_positions {
-                        for pos in asset_positions {
-                            let balance = bd_to_dec(&pos.size.0);
-                            portfolio_guard
-                                .balances
-                                .insert(pos.symbol.0.clone(), balance);
-                        }
-                    }
-                    if let Some(perp_positions) = &content.perpetual_positions {
-                        for pos in perp_positions {
-                            let size = match pos.side {
-                                PositionSide::Short => -bd_to_dec(&pos.size.0),
-                                PositionSide::Long => bd_to_dec(&pos.size.0),
-                            };
-                            let entry_price = bd_to_dec(&pos.entry_price.0);
-                            let realized_pnl =
-                                pos.realized_pnl.as_ref().map_or(Decimal::ZERO, bd_to_dec);
-                            let unrealized_pnl =
-                                pos.unrealized_pnl.as_ref().map_or(Decimal::ZERO, bd_to_dec);
-                            let value = size * entry_price + realized_pnl + unrealized_pnl;
-                            portfolio_guard.positions.insert(
-                                pos.market.0.clone(),
-                                PositionInfo {
-                                    size,
-                                    entry_price,
-                                    realized_pnl,
-                                    unrealized_pnl,
-                                    net_funding: bd_to_dec(&pos.net_funding),
-                                    value,
-                                },
-                            );
-                        }
-                    }
-                }
+            SubaccountsMessage::Update(_upd) => {
 
-                let cash: Decimal = portfolio_guard.balances.values().sum();
-                let position_value: Decimal =
-                    portfolio_guard.positions.values().map(|p| p.value).sum();
-                portfolio_guard.equity = cash + position_value;
-
-                let snapshot = portfolio_guard.clone();
-                drop(portfolio_guard);
-
-                let update = BalanceUpdate {
-                    exchange: "dydx".into(),
-                    address: address.clone(),
-                    equity: snapshot.equity,
-                    free_collateral: cash,
-                    balances: snapshot.balances.clone(),
-                    positions: snapshot.positions.clone(),
-                };
-                tracing::info!("{update:#?}");
-                disruptor.publish(|slot: &mut AppMessage| {
-                    *slot = AppMessage::BalanceUpdate(update);
-                });
             }
         }
     }
@@ -397,12 +302,12 @@ impl DataProvider for Dydx {
                 }
             }
 
-            let portfolio = portfolio.clone();
+            let _portfolio = portfolio.clone();
             match indexer.feed().subaccounts(subaccount, false).await {
                 Ok(feed) => {
                     let d = d.clone();
                     handles.push(tokio::spawn(async move {
-                        handle_subaccounts_feed(d, feed, portfolio).await;
+                        handle_subaccounts_feed(d, feed).await;
                     }));
                 }
                 Err(e) => {
@@ -419,7 +324,13 @@ impl DataProvider for Dydx {
     }
 }
 
-impl Executor for Dydx {
+impl Portfolio for Dydx {
+    fn get_portfolio(&self) -> crate::exchange::types::portfolio::Portfolio {
+        self.portfolio.lock().unwrap().clone()
+    }
+}
+
+impl Orders for Dydx {
     fn create_order(&self) {
         todo!()
     }
@@ -430,10 +341,6 @@ impl Executor for Dydx {
 
     fn cancel_order(&self) {
         todo!()
-    }
-
-    fn get_portfolio(&self) -> Portfolio {
-        self.portfolio.lock().unwrap().clone()
     }
 }
 

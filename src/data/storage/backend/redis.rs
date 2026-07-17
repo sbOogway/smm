@@ -168,8 +168,10 @@ impl<V: serde::Serialize + serde::de::DeserializeOwned + Send + Sync + 'static> 
             .arg("-inf")
             .arg(min_score)
             .query(&mut conn);
-        Box::new(values.into_iter().map(|v| {
-            serde_json::from_str(&v).expect("deserialization failed")
-        }))
+        Box::new(
+            values
+                .into_iter()
+                .map(|v| serde_json::from_str(&v).expect("deserialization failed")),
+        )
     }
 }
