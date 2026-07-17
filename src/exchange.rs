@@ -15,13 +15,14 @@ use crate::config::AppConfig;
 use self::dydx::Dydx;
 use self::hyperliquid::Hyperliquid;
 
-use super::data::types::message::Message;
+use super::types::message::Message;
+use super::types::portfolio::Portfolio;
 
 pub trait Executor {
     fn create_order(&self);
     fn update_order(&self);
     fn cancel_order(&self);
-    fn balance_of(&self, symbol: Option<String>);
+    fn get_portfolio(&self) -> Portfolio;
 }
 
 pub trait DataProvider {

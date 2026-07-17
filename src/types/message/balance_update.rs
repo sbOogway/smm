@@ -15,6 +15,8 @@ pub struct PositionInfo {
 pub struct BalanceUpdate {
     pub exchange: String,
     pub address: String,
+    pub equity: Decimal,
+    pub free_collateral: Decimal,
     pub balances: HashMap<String, Decimal>,
     pub positions: HashMap<String, PositionInfo>,
 }
@@ -43,11 +45,15 @@ mod tests {
         let b = BalanceUpdate {
             exchange: "dydx".into(),
             address: "dydx14zzueazeh0hj67cghhf9jypslcf9sh2n5k6art".into(),
+            equity: Decimal::new(111500, 0),
+            free_collateral: Decimal::new(10000, 0),
             balances,
             positions,
         };
         assert_eq!(b.exchange, "dydx");
         assert_eq!(b.address, "dydx14zzueazeh0hj67cghhf9jypslcf9sh2n5k6art");
+        assert_eq!(b.equity, Decimal::new(111500, 0));
+        assert_eq!(b.free_collateral, Decimal::new(10000, 0));
         assert_eq!(b.balances.get("USDC"), Some(&Decimal::new(10000, 0)));
         assert_eq!(b.balances.get("BTC"), Some(&Decimal::new(1, 0)));
         let btc_pos = b.positions.get("BTC-USD").unwrap();
@@ -74,12 +80,16 @@ mod tests {
         let b = BalanceUpdate {
             exchange: "hyperliquid".into(),
             address: "0xabc123".into(),
+            equity: Decimal::ZERO,
+            free_collateral: Decimal::ZERO,
             balances,
             positions,
         };
         let c = b.clone();
         assert_eq!(b.exchange, c.exchange);
         assert_eq!(b.address, c.address);
+        assert_eq!(b.equity, c.equity);
+        assert_eq!(b.free_collateral, c.free_collateral);
         assert_eq!(b.balances, c.balances);
         assert_eq!(b.positions, c.positions);
     }
@@ -91,6 +101,8 @@ mod tests {
         let b = BalanceUpdate {
             exchange: "test".into(),
             address: "addr1".into(),
+            equity: Decimal::ZERO,
+            free_collateral: Decimal::ZERO,
             balances,
             positions: HashMap::new(),
         };
@@ -105,6 +117,8 @@ mod tests {
         let b = BalanceUpdate {
             exchange: String::new(),
             address: String::new(),
+            equity: Decimal::ZERO,
+            free_collateral: Decimal::ZERO,
             balances: HashMap::new(),
             positions: HashMap::new(),
         };

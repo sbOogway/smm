@@ -70,6 +70,8 @@ mod tests {
         let msg = Message::BalanceUpdate(BalanceUpdate {
             exchange: "dydx".into(),
             address: "dydx14zzueazeh0hj67cghhf9jypslcf9sh2n5k6art".into(),
+            equity: Decimal::ZERO,
+            free_collateral: Decimal::ZERO,
             balances,
             positions: std::collections::HashMap::new(),
         });
@@ -120,6 +122,8 @@ mod tests {
             Message::BalanceUpdate(BalanceUpdate {
                 exchange: "a".into(),
                 address: "addr".into(),
+                equity: Decimal::ZERO,
+                free_collateral: Decimal::ZERO,
                 balances: std::collections::HashMap::new(),
                 positions: std::collections::HashMap::new(),
             }),

@@ -2,6 +2,7 @@
 //!
 //! <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/>
 
+use std::sync::{Arc, Mutex};
 use std::{future::Future, pin::Pin, sync::OnceLock};
 use tokio::net::TcpStream;
 
@@ -16,8 +17,9 @@ use std::str::FromStr;
 
 use crate::{
     config::HyperliquidConfig,
-    data::types::message::{BboUpdate, Message as AppMessage, TradeUpdate},
     exchange::{DataProvider, Exchange, Executor, Infos},
+    types::message::{BboUpdate, Message as AppMessage, TradeUpdate},
+    types::portfolio::Portfolio,
 };
 
 /// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket>
@@ -30,6 +32,7 @@ pub struct Hyperliquid {
     coins: Vec<String>,
     ws_url: String,
     address: String,
+    portfolio: Arc<Mutex<Portfolio>>,
 }
 
 /// <https://hyperliquid.gitbook.io/hyperliquid-docs/for-developers/api/websocket/subscriptions#subscription-messages>
@@ -93,7 +96,12 @@ impl Hyperliquid {
         Self {
             coins: cfg.coins,
             ws_url: ws_url.to_string(),
-            address: cfg.address,
+            address: cfg.address.clone(),
+            portfolio: Arc::new(Mutex::new(Portfolio {
+                equity: Decimal::ZERO,
+                balances: std::collections::HashMap::new(),
+                positions: std::collections::HashMap::new(),
+            })),
         }
     }
 
@@ -278,22 +286,8 @@ impl Executor for Hyperliquid {
         todo!()
     }
 
-    fn balance_of(&self, _symbol: Option<String>) {
-        let request = serde_json::json!({
-            "method": "post",
-            "id": 0,
-            "request": {
-                "type": "info",
-                "payload": {
-                    "type": "clearinghouseState",
-                    "user": self.address,
-                },
-            },
-        });
-
-        if let Some(ws_tx) = WS_TX.get() {
-            let _ = ws_tx.try_send(request.to_string());
-        }
+    fn get_portfolio(&self) -> Portfolio {
+        self.portfolio.lock().unwrap().clone()
     }
 }
 

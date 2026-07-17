@@ -21,10 +21,10 @@ use crate::{
             memory_map::{self, MemoryMap},
         },
         transception::mqtt::MqttPublisher,
-        types::message::{Message, asmm_quote::AsmmQuote},
     },
     exchange::{self, Exchange},
     strategy::Strategy,
+    types::message::{Message, asmm_quote::AsmmQuote},
 };
 
 /// i decided to have these objects static to avoid lifetime headaches and complains
@@ -104,6 +104,9 @@ impl AvellanedaStoikovMarketMaking {
         match message {
             Message::BalanceUpdate(update) => {
                 tracing::info!("{:#?}", update);
+
+                state.set(format!("{}_equity", update.exchange), update.equity);
+
 
                 for (symbol, position) in &update.positions {
                     let q_key = format!("{}_{}_q", update.exchange, symbol);

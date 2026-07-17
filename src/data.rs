@@ -6,4 +6,3 @@
 
 pub mod storage;
 pub mod transception;
-pub mod types;
