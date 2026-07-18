@@ -9,7 +9,6 @@ use std::{sync::OnceLock, time::Duration};
 
 use async_trait::async_trait;
 use disruptor::{MultiProducer, ProcessorSettings, SingleConsumerBarrier, Sleep};
-use futures_util::future;
 use rust_decimal::{Decimal, MathematicalOps};
 use tokio::sync::mpsc::{self, Sender};
 
@@ -24,7 +23,7 @@ use crate::{
         transception::mqtt::MqttPublisher,
     },
     exchange::{
-        self, Exchange,
+        Exchange,
         dydx::Dydx,
         types::message::{Message, asmm_quote::AsmmQuote},
     },
@@ -179,7 +178,7 @@ impl AvellanedaStoikovMarketMaking {
                     }));
                 }
             }
-            Message::FillUpdate(fill_update) => {}
+            Message::FillUpdate(_fill_update) => {}
         }
     }
 }

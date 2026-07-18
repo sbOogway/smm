@@ -1,10 +1,9 @@
 use crate::{
     ccxt::{CcxtOrderSide, CcxtTrade},
     config::DydxConfig,
-    utils::{self, big_decimal_to_decimal},
+    utils::big_decimal_to_decimal,
 };
 use async_trait::async_trait;
-use bigdecimal::BigDecimal;
 use dydx::{
     indexer::{
         Feed, IndexerClient, IndexerConfig, OrderSide, RestConfig, SockConfig, Ticker,
@@ -12,7 +11,6 @@ use dydx::{
     },
     node::{Subaccount, Wallet},
 };
-use rust_decimal::Decimal;
 use serde_json::Value::Null;
 
 use crate::ccxt::{self, Ccxt};
@@ -64,7 +62,7 @@ impl Dydx {
             }
         };
         tracing::info!(address = %account.address(), "dydx wallet derived");
-        let subaccount: Subaccount = match account.subaccount(cfg.subaccount_number) {
+        let _subaccount: Subaccount = match account.subaccount(cfg.subaccount_number) {
             Ok(s) => s,
             Err(e) => {
                 tracing::error!(error = %e, "failed to create subaccount");
@@ -160,8 +158,8 @@ impl Ccxt for Dydx {
 
     async fn watch_order_book(
         &self,
-        symbols: Vec<String>,
-        limit: Option<u8>,
+        _symbols: Vec<String>,
+        _limit: Option<u8>,
     ) -> ccxt::CcxtOrderBook {
         todo!()
     }
@@ -172,50 +170,50 @@ impl Ccxt for Dydx {
 
     async fn watch_orders(
         &self,
-        symbol: String,
-        since: Option<u64>,
-        limit: Option<u64>,
+        _symbol: String,
+        _since: Option<u64>,
+        _limit: Option<u64>,
     ) -> ccxt::CcxtOrder {
         todo!()
     }
 
     async fn watch_my_trades(
         &self,
-        symbols: Vec<String>,
-        since: Option<u64>,
-        limit: Option<u64>,
+        _symbols: Vec<String>,
+        _since: Option<u64>,
+        _limit: Option<u64>,
     ) -> ccxt::CcxtTrade {
         todo!()
     }
 
-    async fn watch_positions(&self, symbols: Vec<String>) -> ccxt::CcxtPosition {
+    async fn watch_positions(&self, _symbols: Vec<String>) -> ccxt::CcxtPosition {
         todo!()
     }
 
     async fn create_order_ws(
         &self,
-        symbol: String,
-        type_: ccxt::CcxtOrderType,
-        side: ccxt::CcxtOrderSide,
-        amount: rust_decimal::prelude::Decimal,
-        price: Option<rust_decimal::prelude::Decimal>,
+        _symbol: String,
+        _type_: ccxt::CcxtOrderType,
+        _side: ccxt::CcxtOrderSide,
+        _amount: rust_decimal::prelude::Decimal,
+        _price: Option<rust_decimal::prelude::Decimal>,
     ) -> ccxt::CcxtOrder {
         todo!()
     }
 
     async fn edit_order_ws(
         &self,
-        id: String,
-        symbol: Option<String>,
-        type_: Option<ccxt::CcxtOrderType>,
-        side: Option<ccxt::CcxtOrderSide>,
-        amount: Option<rust_decimal::prelude::Decimal>,
-        price: Option<rust_decimal::prelude::Decimal>,
+        _id: String,
+        _symbol: Option<String>,
+        _type_: Option<ccxt::CcxtOrderType>,
+        _side: Option<ccxt::CcxtOrderSide>,
+        _amount: Option<rust_decimal::prelude::Decimal>,
+        _price: Option<rust_decimal::prelude::Decimal>,
     ) -> ccxt::CcxtOrder {
         todo!()
     }
 
-    async fn cancel_orders_ws(&self, id: String) -> ccxt::CcxtOrder {
+    async fn cancel_orders_ws(&self, _id: String) -> ccxt::CcxtOrder {
         todo!()
     }
 

@@ -6,7 +6,6 @@
 pub mod dydx;
 // pub mod hyperliquid;
 pub mod types;
-use crate::ccxt;
 
 use std::{future::Future, pin::Pin};
 
@@ -18,7 +17,6 @@ use crate::exchange::types::message::Message;
 use crate::exchange::types::portfolio::Order;
 use types::portfolio::Portfolio as PortfolioType;
 
-use self::dydx::Dydx;
 // use self::hyperliquid::Hyperliquid;
 
 pub trait Portfolio {
@@ -58,7 +56,7 @@ pub trait Infos {
 
 pub trait Exchange: DataProvider + Portfolio  + Send + Sync + Infos {}
 
-pub fn new(name: &str, cfg: &AppConfig) -> Box<dyn Exchange> {
+pub fn new(name: &str, _cfg: &AppConfig) -> Box<dyn Exchange> {
     match name {
         // "hyperliquid" => Box::new(Hyperliquid::new(
         //     cfg.exchange

@@ -121,7 +121,7 @@ impl MqttPublisher {
                 }
                 Message::BalanceUpdate(_) => {}
                 Message::Empty => {}
-                Message::FillUpdate(fill_update) => todo!(),
+                Message::FillUpdate(_fill_update) => todo!(),
             }
         }
 
