@@ -15,7 +15,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     tracing::info!(?cfg, "configuration loaded");
 
-    let mut strategy: Box<dyn Strategy> = match cfg.runtime.strategy.as_str() {
+    let strategy: Box<dyn Strategy> = match cfg.runtime.strategy.as_str() {
         "avellaneda_stoikov_market_making" => Box::new(AvellanedaStoikovMarketMaking::new(&cfg)),
         _ => panic!("strategy not implemented"),
     };
