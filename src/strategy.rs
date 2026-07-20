@@ -11,5 +11,5 @@ pub trait Strategy {
     fn new(cfg: &AppConfig) -> Self
     where
         Self: Sized;
-    async fn run(&mut self);
+    async fn run(self: Box<Self>);
 }

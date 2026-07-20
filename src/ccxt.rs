@@ -55,6 +55,16 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use std::collections::HashMap;
 
+#[derive(Clone, Debug)]
+pub enum CcxtMessage {
+    CcxtEmpty,
+    CcxtBalance(CcxtBalance),
+    CcxtOrderBook(CcxtOrderBook),
+    CcxtOrder(CcxtOrder),
+    CcxtPosition(CcxtPosition),
+    CcxtTrade(CcxtTrade),
+}
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum CcxtLiquiditySide {
@@ -149,8 +159,8 @@ pub struct CcxtOrderBook {
     pub bids: Vec<CcxtOrderBookLevel>,
     pub asks: Vec<CcxtOrderBookLevel>,
     pub symbol: String,
-    pub timestamp: i64,
-    pub datetime: DateTime<Utc>,
+    pub timestamp: Option<i64>,
+    pub datetime: Option<DateTime<Utc>>,
     pub nonce: Option<u64>,
 }
 
@@ -242,12 +252,18 @@ pub struct CcxtTrade {
 pub trait Ccxt: Send + Sync {
     async fn load_markets(&mut self);
     async fn watch_trades(
-        &mut self,
+        &self,
         symbol: String,
         since: Option<u64>,
         limit: Option<u64>,
+    ) -> CcxtTrade;
+    async fn watch_trades_for_symbols(
+        &self,
+        symbols: Vec<String>,
+        since: Option<u64>,
+        limit: Option<u64>,
     ) -> Vec<CcxtTrade>;
-    async fn watch_order_book(&self, symbols: Vec<String>, limit: Option<u8>) -> CcxtOrderBook;
+    async fn watch_order_book(&self, symbol: String, limit: Option<u8>) -> CcxtOrderBook;
     async fn watch_balance(&self) -> CcxtBalance;
     async fn watch_orders(
         &self,
