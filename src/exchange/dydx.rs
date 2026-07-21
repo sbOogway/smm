@@ -16,7 +16,6 @@ use dydx::{
 };
 
 use rust_decimal::Decimal;
-use serde_json::Value::Null;
 
 use crate::ccxt::{self, Ccxt};
 use tokio::sync::{
@@ -88,20 +87,15 @@ async fn handle_trades_feed(
                 .trades
                 .iter()
                 .map(|trade| CcxtTrade {
-                    info: Null,
                     id: trade.id.0.clone(),
                     timestamp: trade.created_at.timestamp_millis(),
                     datetime: trade.created_at,
                     symbol: symbol.clone(),
                     order: Some(trade.id.0.clone()),
-                    order_type: None,
                     side: Some(trade.side.clone().into()),
-                    taker_or_maker: None,
                     price: big_decimal_to_decimal(trade.price.0.clone()),
                     amount: big_decimal_to_decimal(trade.size.0.clone()),
-                    cost: None,
-                    fee: None,
-                    fees: None,
+                    ..Default::default()
                 })
                 .collect::<Vec<CcxtTrade>>(),
             Some(dydx::indexer::TradesMessage::Update(trades)) => {
@@ -114,20 +108,15 @@ async fn handle_trades_feed(
                             .trades
                             .iter()
                             .map(|trade| CcxtTrade {
-                                info: Null,
                                 id: trade.id.0.clone(),
                                 timestamp: trade.created_at.timestamp_millis(),
                                 datetime: trade.created_at,
                                 symbol: symbol.clone(),
                                 order: Some(trade.id.0.clone()),
-                                order_type: None,
                                 side: Some(trade.side.clone().into()),
-                                taker_or_maker: None,
                                 price: big_decimal_to_decimal(trade.price.0.clone()),
                                 amount: big_decimal_to_decimal(trade.size.0.clone()),
-                                cost: None,
-                                fee: None,
-                                fees: None,
+                                ..Default::default()
                             })
                             .collect::<Vec<CcxtTrade>>()
                     })
@@ -167,9 +156,8 @@ fn book_to_ccxt(order_book: &OrderBook, symbol: &str, nonce: u64) -> CcxtOrderBo
         bids,
         asks,
         symbol: symbol.to_string(),
-        timestamp: None,
-        datetime: None,
         nonce: Some(nonce),
+        ..Default::default()
     }
 }
 
@@ -234,14 +222,10 @@ async fn handle_subaccount_feed(
                 free.insert("USDC".into(), usdc_balance);
 
                 let _ = balance_tx.send(CcxtBalance {
-                    info: serde_json::Value::Null,
                     timestamp: Utc::now().timestamp() as u64,
                     datetime: Utc::now().to_rfc3339(),
                     free,
-                    used: HashMap::new(),
-                    total: HashMap::new(),
-                    debt: HashMap::new(),
-                    currencies: HashMap::new(),
+                    ..Default::default()
                 });
 
                 for (_ticker, position) in &subaccount.open_perpetual_positions {
@@ -249,40 +233,22 @@ async fn handle_subaccount_feed(
                         dydx::indexer::PositionSide::Long => CcxtPositionSide::Long,
                         dydx::indexer::PositionSide::Short => CcxtPositionSide::Short,
                     };
-                    let contracts = big_decimal_to_decimal(position.size.0.clone())
-                        .to_f64()
-                        .unwrap_or(0.0);
-                    let entry_price = big_decimal_to_decimal(position.entry_price.0.clone())
-                        .to_f64()
-                        .unwrap_or(0.0);
-                    let unrealized_pnl = big_decimal_to_decimal(position.unrealized_pnl.clone())
-                        .to_f64()
-                        .unwrap_or(0.0);
+                    let contracts = big_decimal_to_decimal(position.size.0.clone());
+                    let entry_price = big_decimal_to_decimal(position.entry_price.0.clone());
+                    let unrealized_pnl = big_decimal_to_decimal(position.unrealized_pnl.clone());
 
                     let _ = position_tx.send(CcxtPosition {
-                        info: serde_json::Value::Null,
                         id: position.market.0.clone(),
                         symbol: position.market.0.clone(),
                         timestamp: Utc::now().timestamp() as u64,
                         datetime: Utc::now().to_rfc3339(),
-                        isolated: false,
-                        hedged: false,
                         side,
                         contracts,
-                        contract_size: 1.0,
+                        contract_size: Decimal::ONE,
                         entry_price,
-                        mark_price: 0.0,
-                        notional: 0.0,
-                        leverage: 0.0,
-                        collateral: 0.0,
-                        initial_margin: 0.0,
-                        maintenance_margin: 0.0,
-                        initial_margin_percentage: 0.0,
-                        maintenance_margin_percentage: 0.0,
                         unrealized_pnl,
-                        liquidation_price: 0.0,
-                        margin_mode: crate::ccxt::CcxtMarginMode::Cross,
-                        percentage: 0.0,
+                        liquidation_price: Decimal::ZERO,
+                        ..Default::default()
                     });
                 }
             }
@@ -306,40 +272,24 @@ async fn handle_subaccount_feed(
                                 dydx::indexer::PositionSide::Long => CcxtPositionSide::Long,
                                 dydx::indexer::PositionSide::Short => CcxtPositionSide::Short,
                             };
-                            let contracts = big_decimal_to_decimal(position.size.0.clone())
-                                .to_f64()
-                                .unwrap_or(0.0);
-                            let entry_price = big_decimal_to_decimal(position.entry_price.0.clone())
-                                .to_f64()
-                                .unwrap_or(0.0);
+                            let contracts = big_decimal_to_decimal(position.size.0.clone());
+                            let entry_price = big_decimal_to_decimal(position.entry_price.0.clone());
                             let unrealized_pnl = position.unrealized_pnl.as_ref()
-                                .map(|v| big_decimal_to_decimal(v.clone()).to_f64().unwrap_or(0.0))
-                                .unwrap_or(0.0);
+                                .map(|v| big_decimal_to_decimal(v.clone()))
+                                .unwrap_or(Decimal::ZERO);
 
                             let _ = position_tx.send(CcxtPosition {
-                                info: serde_json::Value::Null,
                                 id: position.position_id.clone(),
                                 symbol: position.market.0.clone(),
                                 timestamp: Utc::now().timestamp() as u64,
                                 datetime: Utc::now().to_rfc3339(),
-                                isolated: false,
-                                hedged: false,
                                 side,
                                 contracts,
-                                contract_size: 1.0,
+                                contract_size: Decimal::ONE,
                                 entry_price,
-                                mark_price: 0.0,
-                                notional: 0.0,
-                                leverage: 0.0,
-                                collateral: 0.0,
-                                initial_margin: 0.0,
-                                maintenance_margin: 0.0,
-                                initial_margin_percentage: 0.0,
-                                maintenance_margin_percentage: 0.0,
                                 unrealized_pnl,
-                                liquidation_price: 0.0,
-                                margin_mode: crate::ccxt::CcxtMarginMode::Cross,
-                                percentage: 0.0,
+                                liquidation_price: Decimal::ZERO,
+                                ..Default::default()
                             });
                         }
                     }
@@ -347,14 +297,10 @@ async fn handle_subaccount_feed(
 
                 if !free.is_empty() {
                     let _ = balance_tx.send(CcxtBalance {
-                        info: serde_json::Value::Null,
                         timestamp: Utc::now().timestamp() as u64,
                         datetime: Utc::now().to_rfc3339(),
                         free,
-                        used: HashMap::new(),
-                        total: HashMap::new(),
-                        debt: HashMap::new(),
-                        currencies: HashMap::new(),
+                        ..Default::default()
                     });
                 }
             }

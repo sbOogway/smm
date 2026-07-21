@@ -5,6 +5,7 @@
 //!
 //! this is the structure stolen from the docs that i want to replicate
 //!
+//! ```text
 //!                              User
 //! +-------------------------------------------------------------+
 //! |                          CCXT Pro                           |
@@ -43,6 +44,7 @@
 //! |                            CCXT                             |
 //! |                                                             |
 //! +=============================================================+
+//! ```
 //!
 //!
 //! <https://docs.ccxt.com/docs/pro-manual#unified-api>
@@ -65,30 +67,34 @@ pub enum CcxtMessage {
     CcxtTrade(CcxtTrade),
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum CcxtLiquiditySide {
     Taker,
+    #[default]
     Maker,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum CcxtMarginMode {
+    #[default]
     Cross,
     Isolated,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum CcxtOrderSide {
+    #[default]
     Buy,
     Sell,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum CcxtOrderStatus {
+    #[default]
     Open,
     Closed,
     Canceled,
@@ -96,30 +102,33 @@ pub enum CcxtOrderStatus {
     Rejected,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum CcxtOrderType {
     Market,
+    #[default]
     Limit,
     StopLimit,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 #[serde(rename_all = "lowercase")]
 pub enum CcxtPositionSide {
+    #[default]
     Long,
     Short,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum CcxtTimeInForce {
+    #[default]
     GTC,
     IOC,
     FOK,
     PO,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CcxtBalance {
     pub info: Value,
     pub timestamp: u64,
@@ -132,14 +141,14 @@ pub struct CcxtBalance {
     pub currencies: HashMap<String, CcxtCurrencyBalance>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CcxtCurrencyBalance {
     pub free: f64,
     pub used: f64,
     pub total: f64,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CcxtFee {
     pub cost: Decimal,
@@ -147,13 +156,13 @@ pub struct CcxtFee {
     pub rate: Option<Decimal>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CcxtOrderBookLevel {
     pub price: Decimal,
     pub amount: Decimal,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CcxtOrderBook {
     pub bids: Vec<CcxtOrderBookLevel>,
@@ -164,14 +173,14 @@ pub struct CcxtOrderBook {
     pub nonce: Option<u64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct CcxtOrderFee {
     pub currency: String,
     pub cost: f64,
     pub rate: Option<f64>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CcxtOrder {
     pub id: String,
@@ -200,7 +209,7 @@ pub struct CcxtOrder {
     pub info: Value,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
 #[serde(rename_all = "camelCase")]
 pub struct CcxtPosition {
     pub info: Value,
@@ -211,21 +220,21 @@ pub struct CcxtPosition {
     pub isolated: bool,
     pub hedged: bool,
     pub side: CcxtPositionSide,
-    pub contracts: f64,
-    pub contract_size: f64,
-    pub entry_price: f64,
-    pub mark_price: f64,
-    pub notional: f64,
-    pub leverage: f64,
-    pub collateral: f64,
-    pub initial_margin: f64,
-    pub maintenance_margin: f64,
-    pub initial_margin_percentage: f64,
-    pub maintenance_margin_percentage: f64,
-    pub unrealized_pnl: f64,
-    pub liquidation_price: f64,
+    pub contracts: Decimal,
+    pub contract_size: Decimal,
+    pub entry_price: Decimal,
+    pub mark_price: Decimal,
+    pub notional: Decimal,
+    pub leverage: Decimal,
+    pub collateral: Decimal,
+    pub initial_margin: Decimal,
+    pub maintenance_margin: Decimal,
+    pub initial_margin_percentage: Decimal,
+    pub maintenance_margin_percentage: Decimal,
+    pub unrealized_pnl: Decimal,
+    pub liquidation_price: Decimal,
     pub margin_mode: CcxtMarginMode,
-    pub percentage: f64,
+    pub percentage: Decimal,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
