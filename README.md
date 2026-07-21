@@ -106,12 +106,21 @@ flowchart TD
 ### strategies
 #### avellaneda stoikov market making
 ```mermaid
-flowchart TD
-    subgraph asmm
-        subgraph state
-            ask_price
-            bid_price
-            mid_price
-        end
-    end
+stateDiagram-v2
+    watch_trades --> σ
+    watch_trades --> κ
+    watch_trades --> q
+    
+    
+    κ --> optimal_spread
+    σ --> optimal_spread 
+    
+    
+    q --> reservation_price
+    σ --> reservation_price
+    γ --> reservation_price
+
+    reservation_price --> create_update_order
+    optimal_spread --> create_update_order
+    create_update_order --> watch_trades
 ```

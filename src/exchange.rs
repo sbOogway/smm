@@ -4,50 +4,34 @@
 //! balances.
 
 pub mod dydx;
-pub mod hyperliquid;
+// pub mod hyperliquid;
+// pub mod types;
 
-use std::{future::Future, pin::Pin};
-
-use disruptor::{MultiProducer, SingleConsumerBarrier};
-
+use crate::ccxt::Ccxt;
 use crate::config::AppConfig;
-
-use self::dydx::Dydx;
-use self::hyperliquid::Hyperliquid;
-
-use super::data::types::message::Message;
-
-pub trait Executor {
-    fn create_order(&self);
-    fn update_order(&self);
-    fn cancel_order(&self);
-    fn balance_of(&self, symbol: Option<String>);
-}
-
-pub trait DataProvider {
-    fn listen(
-        &self,
-        disruptor: MultiProducer<Message, SingleConsumerBarrier>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>>;
-}
-
-pub trait Infos {
-    fn name(&self) -> String;
+use crate::exchange::dydx::Dydx;
+// use crate::exchange::types::message::Message;
+// use crate::exchange::types::portfolio::Order;
+// use types::portfolio::Portfolio as PortfolioType;
+pub trait Info {
+    fn add_symbol(&mut self, symbol: String);
     fn symbols(&self) -> Vec<String>;
+    fn name(&self) -> String;
 }
 
-pub trait Exchange: DataProvider + Executor + Send + Sync + Infos {}
+pub trait Exchange: Info + Ccxt {}
 
-pub fn new(name: &str, cfg: &AppConfig) -> Box<dyn Exchange> {
+pub fn new(name: &str, _cfg: &AppConfig) -> Box<dyn Exchange> {
     match name {
-        "hyperliquid" => Box::new(Hyperliquid::new(
-            cfg.exchange
-                .hyperliquid
-                .clone()
-                .expect("missing [exchange.hyperliquid] config"),
-        )),
+        // "hyperliquid" => Box::new(Hyperliquid::new(
+        //     cfg.exchange
+        //         .hyperliquid
+        //         .clone()
+        //         .expect("missing [exchange.hyperliquid] config"),
+        // )),
         "dydx" => Box::new(Dydx::new(
-            cfg.exchange
+            &_cfg
+                .exchange
                 .dydx
                 .clone()
                 .expect("missing [exchange.dydx] config"),

@@ -1,418 +1,571 @@
-//! dydx exchange implementation.
-//!
-//! <https://docs.dydx.xyz>
-
-use std::str::FromStr;
-use std::{future::Future, pin::Pin, sync::OnceLock};
-
-use bigdecimal::BigDecimal as BigDec;
-use disruptor::{MultiProducer, Producer, SingleConsumerBarrier};
-use dydx::indexer::{
-    IndexerClient, IndexerConfig, OrderSide, OrdersMessage, PositionSide, RestConfig, SockConfig,
-    Subaccount, SubaccountsMessage, Ticker, TradesMessage,
-};
-use dydx::node::Wallet;
-use rust_decimal::Decimal;
-use tokio::sync::watch;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::{
+    ccxt::{CcxtBalance, CcxtOrderBook, CcxtOrderBookLevel, CcxtOrderSide, CcxtPosition, CcxtPositionSide, CcxtTrade},
     config::DydxConfig,
-    data::types::message::{
-        BalanceUpdate, BboUpdate, Message as AppMessage, PositionInfo, TradeUpdate,
-    },
-    exchange::{DataProvider, Exchange, Executor, Infos},
+    exchange::{Exchange, Info},
+    utils::big_decimal_to_decimal,
+};
+use async_trait::async_trait;
+use bigdecimal::{ToPrimitive, Zero};
+use chrono::Utc;
+use dydx::{
+    indexer::{
+        Feed, IndexerClient, IndexerConfig, OrderSide, OrderbookResponsePriceLevel, OrdersMessage, Price, Quantity, RestConfig, SockConfig, SubaccountsMessage, Ticker, TradesMessage,
+    }, node::Wallet,
 };
 
-fn bd_to_dec(bd: &BigDec) -> Decimal {
-    Decimal::from_str(&bd.to_string()).expect("bigdecimal to decimal conversion")
-}
+use rust_decimal::Decimal;
 
-static BALANCE_TX: OnceLock<watch::Sender<Decimal>> = OnceLock::new();
+use crate::ccxt::{self, Ccxt};
+use tokio::sync::{
+    Mutex,
+    mpsc::{self, UnboundedReceiver, UnboundedSender},
+};
+
+impl From<OrderSide> for CcxtOrderSide {
+    fn from(value: OrderSide) -> Self {
+        match value {
+            OrderSide::Buy => Self::Buy,
+            OrderSide::Sell => Self::Sell,
+        }
+    }
+}
 
 pub struct Dydx {
-    tickers: Vec<String>,
-    balance_rx: watch::Receiver<Decimal>,
-    config: DydxConfig,
+    indexer: Mutex<IndexerClient>,
+    symbols: Vec<String>,
+    address: String,
+    subaccount_number: u32,
+    trades_tx: UnboundedSender<CcxtTrade>,
+    trades_rx: Mutex<UnboundedReceiver<CcxtTrade>>,
+    order_book_tx: UnboundedSender<CcxtOrderBook>,
+    order_book_rx: Mutex<UnboundedReceiver<CcxtOrderBook>>,
+    balance_tx: UnboundedSender<CcxtBalance>,
+    balance_rx: Mutex<UnboundedReceiver<CcxtBalance>>,
+    position_tx: UnboundedSender<CcxtPosition>,
+    position_rx: Mutex<UnboundedReceiver<CcxtPosition>>,
 }
-
-impl Dydx {
-    pub fn new(cfg: DydxConfig) -> Self {
-        let (balance_tx, balance_rx) = watch::channel(Decimal::ZERO);
-        let _ = BALANCE_TX.set(balance_tx);
-        Self {
-            tickers: cfg.tickers.clone(),
-            balance_rx,
-            config: cfg,
+#[derive(Default, Debug)]
+pub struct OrderBook {
+    // Use `BTreeMap` for easier sorting. 
+    pub bids: BTreeMap<Price, (Quantity, u64)>,
+    pub asks: BTreeMap<Price, (Quantity, u64)>,
+    pub offset: u64,
+}
+ 
+impl OrderBook {
+    pub fn update_bids(&mut self, bids: Vec<OrderbookResponsePriceLevel>) {
+        Self::update(&mut self.bids, bids, &mut self.offset);
+    }
+ 
+    pub fn update_asks(&mut self, asks: Vec<OrderbookResponsePriceLevel>) {
+        Self::update(&mut self.asks, asks, &mut self.offset);
+    }
+ 
+    fn update(map: &mut BTreeMap<Price, (Quantity, u64)>, levels: Vec<OrderbookResponsePriceLevel>, offset: &mut u64) {
+        for level in levels {
+            if level.size.is_zero() {
+                map.remove(&level.price);
+            } else {
+                map.insert(level.price, (level.size, *offset));
+                *offset += 1;
+            }
         }
     }
 }
 
 async fn handle_trades_feed(
-    mut disruptor: MultiProducer<AppMessage, SingleConsumerBarrier>,
-    mut feed: dydx::indexer::Feed<TradesMessage>,
-    ticker: String,
+    feed: &mut Feed<TradesMessage>,
+    sender: UnboundedSender<CcxtTrade>,
+    symbol: &String,
 ) {
-    while let Some(msg) = feed.recv().await {
-        match msg {
-            TradesMessage::Initial(init) => {
-                for trade in init.contents.trades {
-                    let price = bd_to_dec(&trade.price.0);
-                    let size = bd_to_dec(&trade.size.0);
-                    let side = match trade.side {
-                        OrderSide::Buy => "buy",
-                        OrderSide::Sell => "sell",
-                    };
-                    let time = trade.created_at.timestamp() as u64;
-                    let msg = AppMessage::TradeUpdate(TradeUpdate {
-                        exchange: "dydx".into(),
-                        symbol: ticker.clone(),
-                        side: side.into(),
-                        price,
-                        size,
-                        time,
-                    });
-                    disruptor.publish(|slot: &mut AppMessage| {
-                        *slot = msg;
-                    });
-                }
-            }
-            TradesMessage::Update(upd) => {
-                for contents in upd.contents {
-                    for trade in contents.trades {
-                        let price = bd_to_dec(&trade.price.0);
-                        let size = bd_to_dec(&trade.size.0);
-                        let side = match trade.side {
-                            OrderSide::Buy => "buy",
-                            OrderSide::Sell => "sell",
-                        };
-                        let time = trade.created_at.timestamp() as u64;
-                        let msg = AppMessage::TradeUpdate(TradeUpdate {
-                            exchange: "dydx".into(),
-                            symbol: ticker.clone(),
-                            side: side.into(),
-                            price,
-                            size,
-                            time,
-                        });
-                        disruptor.publish(|slot: &mut AppMessage| {
-                            *slot = msg;
-                        });
-                    }
-                }
-            }
-        }
-    }
-}
+    loop {
+        let trades = match feed.recv().await {
+            Some(dydx::indexer::TradesMessage::Initial(trades)) => trades
+                .contents
+                .trades
+                .iter()
+                .map(|trade| CcxtTrade {
+                    id: trade.id.0.clone(),
+                    timestamp: trade.created_at.timestamp_millis(),
+                    datetime: trade.created_at,
+                    symbol: symbol.clone(),
+                    order: Some(trade.id.0.clone()),
+                    side: Some(trade.side.clone().into()),
+                    price: big_decimal_to_decimal(trade.price.0.clone()),
+                    amount: big_decimal_to_decimal(trade.size.0.clone()),
+                    ..Default::default()
+                })
+                .collect::<Vec<CcxtTrade>>(),
+            Some(dydx::indexer::TradesMessage::Update(trades)) => {
+                let trades_update_contents = trades.contents;
 
-async fn handle_orders_feed(
-    mut disruptor: MultiProducer<AppMessage, SingleConsumerBarrier>,
-    mut feed: dydx::indexer::Feed<OrdersMessage>,
-    ticker: String,
-) {
-    let mut best_bid_price = Decimal::ZERO;
-    let mut best_bid_size = Decimal::ZERO;
-    let mut best_ask_price = Decimal::ZERO;
-    let mut best_ask_size = Decimal::ZERO;
+                trades_update_contents
+                    .iter()
+                    .flat_map(|update| {
+                        update
+                            .trades
+                            .iter()
+                            .map(|trade| CcxtTrade {
+                                id: trade.id.0.clone(),
+                                timestamp: trade.created_at.timestamp_millis(),
+                                datetime: trade.created_at,
+                                symbol: symbol.clone(),
+                                order: Some(trade.id.0.clone()),
+                                side: Some(trade.side.clone().into()),
+                                price: big_decimal_to_decimal(trade.price.0.clone()),
+                                amount: big_decimal_to_decimal(trade.size.0.clone()),
+                                ..Default::default()
+                            })
+                            .collect::<Vec<CcxtTrade>>()
+                    })
+                    .collect::<Vec<CcxtTrade>>()
+            }
 
-    while let Some(msg) = feed.recv().await {
-        let (bids, asks) = match msg {
-            OrdersMessage::Initial(init) => (init.contents.bids, init.contents.asks),
-            OrdersMessage::Update(upd) => (
-                upd.contents.bids.unwrap_or_default(),
-                upd.contents.asks.unwrap_or_default(),
-            ),
+            None => Vec::new(),
         };
 
-        for level in &bids {
-            let price = bd_to_dec(&level.price.0);
-            let size = bd_to_dec(&level.size.0);
-            if size.is_zero() && price == best_bid_price {
-                best_bid_price = Decimal::ZERO;
-                best_bid_size = Decimal::ZERO;
-            } else if !size.is_zero() && price > best_bid_price {
-                best_bid_price = price;
-                best_bid_size = size;
-            }
-        }
-
-        for level in &asks {
-            let price = bd_to_dec(&level.price.0);
-            let size = bd_to_dec(&level.size.0);
-            if size.is_zero() && price == best_ask_price {
-                best_ask_price = Decimal::ZERO;
-                best_ask_size = Decimal::ZERO;
-            } else if !size.is_zero() && (best_ask_price.is_zero() || price < best_ask_price) {
-                best_ask_price = price;
-                best_ask_size = size;
-            }
-        }
-
-        if best_bid_price > Decimal::ZERO && best_ask_price > Decimal::ZERO {
-            let mid = (best_bid_price + best_ask_price) / Decimal::new(2, 0);
-
-            let now = std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_millis() as u64;
-
-            let msg = AppMessage::BboUpdate(BboUpdate {
-                exchange: "dydx".into(),
-                symbol: ticker.clone(),
-                bid_price: best_bid_price,
-                bid_size: best_bid_size,
-                ask_price: best_ask_price,
-                ask_size: best_ask_size,
-                time: now,
-                mid_price: mid,
-            });
-
-            disruptor.publish(|slot: &mut AppMessage| {
-                *slot = msg;
-            });
+        for trade in trades {
+            let _ = sender.send(trade.clone());
         }
     }
 }
 
-async fn handle_subaccounts_feed(
-    mut disruptor: MultiProducer<AppMessage, SingleConsumerBarrier>,
-    mut feed: dydx::indexer::Feed<SubaccountsMessage>,
+fn book_to_ccxt(order_book: &OrderBook, symbol: &str, nonce: u64) -> CcxtOrderBook {
+    let best_bid = order_book.bids.last_key_value();
+    let best_ask = order_book.asks.first_key_value();
+
+    let bids = best_bid
+        .into_iter()
+        .map(|(price, (size, _))| CcxtOrderBookLevel {
+            price: big_decimal_to_decimal(price.0.clone()),
+            amount: big_decimal_to_decimal(size.0.clone()),
+        })
+        .collect();
+
+    let asks = best_ask
+        .into_iter()
+        .map(|(price, (size, _))| CcxtOrderBookLevel {
+            price: big_decimal_to_decimal(price.0.clone()),
+            amount: big_decimal_to_decimal(size.0.clone()),
+        })
+        .collect();
+
+    CcxtOrderBook {
+        bids,
+        asks,
+        symbol: symbol.to_string(),
+        nonce: Some(nonce),
+        ..Default::default()
+    }
+}
+
+async fn handle_order_book_feed(
+    feed: &mut Feed<OrdersMessage>,
+    sender: UnboundedSender<CcxtOrderBook>,
+    symbol: &String,
 ) {
-    let mut address = String::new();
-    let mut balances = std::collections::HashMap::new();
-    let mut positions = std::collections::HashMap::new();
+    let mut book = OrderBook::default();
 
-    while let Some(msg) = feed.recv().await {
-        match msg {
-            SubaccountsMessage::Initial(init) => {
-                let equity = bd_to_dec(&init.contents.subaccount.equity);
-                tracing::info!(%equity, "dydx subaccount equity");
-                if let Some(tx) = BALANCE_TX.get() {
-                    let _ = tx.send(equity);
-                }
-
-                address = String::from(init.contents.subaccount.address.clone());
-                balances.clear();
-                for (ticker, pos) in &init.contents.subaccount.asset_positions {
-                    let balance = bd_to_dec(&pos.size.0);
-                    let balance = match pos.side {
-                        PositionSide::Short => -balance,
-                        PositionSide::Long => balance,
-                    };
-                    balances.insert(ticker.0.clone(), balance);
-                }
-
-                positions.clear();
-                for (market, pos) in &init.contents.subaccount.open_perpetual_positions {
-                    let size = match pos.side {
-                        PositionSide::Short => -bd_to_dec(&pos.size.0),
-                        PositionSide::Long => bd_to_dec(&pos.size.0),
-                    };
-                    let entry_price = bd_to_dec(&pos.entry_price.0);
-                    let realized_pnl = bd_to_dec(&pos.realized_pnl);
-                    let unrealized_pnl = bd_to_dec(&pos.unrealized_pnl);
-                    positions.insert(
-                        market.0.clone(),
-                        PositionInfo {
-                            size,
-                            entry_price,
-                            realized_pnl,
-                            unrealized_pnl,
-                            net_funding: bd_to_dec(&pos.net_funding),
-                            value: size * entry_price + realized_pnl + unrealized_pnl,
-                        },
-                    );
-                }
-
-                let update = BalanceUpdate {
-                    exchange: "dydx".into(),
-                    address: address.clone(),
-                    balances: balances.clone(),
-                    positions: positions.clone(),
-                };
-                disruptor.publish(|slot: &mut AppMessage| {
-                    *slot = AppMessage::BalanceUpdate(update);
-                });
+    loop {
+        match feed.recv().await {
+            Some(dydx::indexer::OrdersMessage::Initial(initial)) => {
+                book.bids.clear();
+                book.asks.clear();
+                book.update_bids(initial.contents.bids);
+                book.update_asks(initial.contents.asks);
+                let ob = book_to_ccxt(&book, symbol, initial.message_id);
+                let _ = sender.send(ob);
             }
-            SubaccountsMessage::Update(upd) => {
-                for content in &upd.contents {
-                    if let Some(asset_positions) = &content.asset_positions {
-                        for pos in asset_positions {
-                            let balance = bd_to_dec(&pos.size.0);
-                            let balance = match pos.side {
-                                PositionSide::Short => -balance,
-                                PositionSide::Long => balance,
-                            };
-                            balances.insert(pos.symbol.0.clone(), balance);
-                        }
-                    }
-                    if let Some(perp_positions) = &content.perpetual_positions {
-                        for pos in perp_positions {
-                            let size = match pos.side {
-                                PositionSide::Short => -bd_to_dec(&pos.size.0),
-                                PositionSide::Long => bd_to_dec(&pos.size.0),
-                            };
-                            let entry_price = bd_to_dec(&pos.entry_price.0);
-                            let realized_pnl =
-                                pos.realized_pnl.as_ref().map_or(Decimal::ZERO, bd_to_dec);
-                            let unrealized_pnl =
-                                pos.unrealized_pnl.as_ref().map_or(Decimal::ZERO, bd_to_dec);
-                            positions.insert(
-                                pos.market.0.clone(),
-                                PositionInfo {
-                                    size,
-                                    entry_price,
-                                    realized_pnl,
-                                    unrealized_pnl,
-                                    net_funding: bd_to_dec(&pos.net_funding),
-                                    value: size * entry_price + realized_pnl + unrealized_pnl,
-                                },
-                            );
-                        }
-                    }
+            Some(dydx::indexer::OrdersMessage::Update(update)) => {
+                if let Some(bids) = update.contents.bids {
+                    book.update_bids(bids);
                 }
-
-                let update = BalanceUpdate {
-                    exchange: "dydx".into(),
-                    address: address.clone(),
-                    balances: balances.clone(),
-                    positions: positions.clone(),
-                };
-                disruptor.publish(|slot: &mut AppMessage| {
-                    *slot = AppMessage::BalanceUpdate(update);
-                });
+                if let Some(asks) = update.contents.asks {
+                    book.update_asks(asks);
+                }
+                let ob = book_to_ccxt(&book, symbol, update.message_id);
+                let _ = sender.send(ob);
+            }
+            None => {
+                tracing::warn!("order book feed closed for {symbol}");
+                break;
             }
         }
     }
 }
 
-impl Infos for Dydx {
+async fn handle_subaccount_feed(
+    feed: &mut Feed<SubaccountsMessage>,
+    balance_tx: UnboundedSender<CcxtBalance>,
+    position_tx: UnboundedSender<CcxtPosition>,
+) {
+    loop {
+        match feed.recv().await {
+            Some(SubaccountsMessage::Initial(initial)) => {
+                let subaccount = &initial.contents.subaccount;
+                let free_collateral = big_decimal_to_decimal(subaccount.free_collateral.clone())
+                    .to_f64()
+                    .unwrap_or(0.0);
+                let mut usdc_balance = free_collateral;
+
+                for (ticker, asset) in &subaccount.asset_positions {
+                    if ticker.0 == "USDC" {
+                        usdc_balance = big_decimal_to_decimal(asset.size.0.clone())
+                            .to_f64()
+                            .unwrap_or(0.0);
+                    }
+                }
+
+                let mut free = HashMap::new();
+                free.insert("USDC".into(), usdc_balance);
+
+                let _ = balance_tx.send(CcxtBalance {
+                    timestamp: Utc::now().timestamp() as u64,
+                    datetime: Utc::now().to_rfc3339(),
+                    free,
+                    ..Default::default()
+                });
+
+                for (_ticker, position) in &subaccount.open_perpetual_positions {
+                    let side = match position.side {
+                        dydx::indexer::PositionSide::Long => CcxtPositionSide::Long,
+                        dydx::indexer::PositionSide::Short => CcxtPositionSide::Short,
+                    };
+                    let contracts = big_decimal_to_decimal(position.size.0.clone());
+                    let entry_price = big_decimal_to_decimal(position.entry_price.0.clone());
+                    let unrealized_pnl = big_decimal_to_decimal(position.unrealized_pnl.clone());
+
+                    let _ = position_tx.send(CcxtPosition {
+                        id: position.market.0.clone(),
+                        symbol: position.market.0.clone(),
+                        timestamp: Utc::now().timestamp() as u64,
+                        datetime: Utc::now().to_rfc3339(),
+                        side,
+                        contracts,
+                        contract_size: Decimal::ONE,
+                        entry_price,
+                        unrealized_pnl,
+                        liquidation_price: Decimal::ZERO,
+                        ..Default::default()
+                    });
+                }
+            }
+            Some(SubaccountsMessage::Update(update)) => {
+                let mut free = HashMap::new();
+
+                for content in &update.contents {
+                    if let Some(asset_positions) = &content.asset_positions {
+                        for asset in asset_positions {
+                            let size = big_decimal_to_decimal(asset.size.0.clone())
+                                .to_f64()
+                                .unwrap_or(0.0);
+                            let symbol = asset.symbol.0.clone();
+                            free.insert(symbol, size);
+                        }
+                    }
+
+                    if let Some(perpetual_positions) = &content.perpetual_positions {
+                        for position in perpetual_positions {
+                            let side = match position.side {
+                                dydx::indexer::PositionSide::Long => CcxtPositionSide::Long,
+                                dydx::indexer::PositionSide::Short => CcxtPositionSide::Short,
+                            };
+                            let contracts = big_decimal_to_decimal(position.size.0.clone());
+                            let entry_price = big_decimal_to_decimal(position.entry_price.0.clone());
+                            let unrealized_pnl = position.unrealized_pnl.as_ref()
+                                .map(|v| big_decimal_to_decimal(v.clone()))
+                                .unwrap_or(Decimal::ZERO);
+
+                            let _ = position_tx.send(CcxtPosition {
+                                id: position.position_id.clone(),
+                                symbol: position.market.0.clone(),
+                                timestamp: Utc::now().timestamp() as u64,
+                                datetime: Utc::now().to_rfc3339(),
+                                side,
+                                contracts,
+                                contract_size: Decimal::ONE,
+                                entry_price,
+                                unrealized_pnl,
+                                liquidation_price: Decimal::ZERO,
+                                ..Default::default()
+                            });
+                        }
+                    }
+                }
+
+                if !free.is_empty() {
+                    let _ = balance_tx.send(CcxtBalance {
+                        timestamp: Utc::now().timestamp() as u64,
+                        datetime: Utc::now().to_rfc3339(),
+                        free,
+                        ..Default::default()
+                    });
+                }
+            }
+            None => {
+                tracing::warn!("balance feed closed");
+                break;
+            }
+        }
+    }
+}
+
+impl Dydx {
+    pub fn new(cfg: &DydxConfig) -> Self {
+        let sock_cfg = SockConfig {
+            endpoint: cfg.indexer_ws_endpoint.clone(),
+            timeout: 5_000,
+            rate_limit: std::num::NonZeroU32::new(2).unwrap(),
+        };
+        let rest_cfg = RestConfig {
+            endpoint: "http://localhost".into(),
+        };
+        let indexer_cfg = IndexerConfig {
+            rest: rest_cfg,
+            sock: sock_cfg,
+        };
+
+        let indexer = IndexerClient::new(indexer_cfg);
+
+        let wallet = match Wallet::from_mnemonic(&cfg.mnemonic) {
+            Ok(w) => w,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to create wallet from mnemonic");
+                panic!();
+            }
+        };
+        let account = match wallet.account_offline(0) {
+            Ok(a) => a,
+            Err(e) => {
+                tracing::error!(error = %e, "failed to derive account");
+                panic!();
+            }
+        };
+        tracing::info!(address = %account.address(), "dydx wallet derived");
+
+        let (trades_tx, trades_rx) = mpsc::unbounded_channel::<CcxtTrade>();
+        let (order_book_tx, order_book_rx) = mpsc::unbounded_channel::<CcxtOrderBook>();
+        let (balance_tx, balance_rx) = mpsc::unbounded_channel::<CcxtBalance>();
+        let (position_tx, position_rx) = mpsc::unbounded_channel::<CcxtPosition>();
+        Self {
+            indexer: Mutex::new(indexer),
+            symbols: Vec::new(),
+            address: account.address().to_string(),
+            subaccount_number: cfg.subaccount_number,
+            trades_tx,
+            trades_rx: Mutex::new(trades_rx),
+            order_book_tx,
+            order_book_rx: Mutex::new(order_book_rx),
+            balance_tx,
+            balance_rx: Mutex::new(balance_rx),
+            position_tx,
+            position_rx: Mutex::new(position_rx),
+        }
+    }
+}
+
+#[async_trait]
+impl Ccxt for Dydx {
+    async fn load_markets(&mut self) {
+        {
+            let mut indexer = self.indexer.lock().await;
+            let subaccount: dydx::indexer::Subaccount = dydx::indexer::Subaccount::new(
+                self.address.parse().unwrap(),
+                self.subaccount_number.try_into().unwrap(),
+            );
+            let mut balance_feed = indexer.feed().subaccounts(subaccount, false).await.unwrap();
+            let balance_tx = self.balance_tx.clone();
+            let position_tx = self.position_tx.clone();
+            tokio::spawn(async move {
+                handle_subaccount_feed(&mut balance_feed, balance_tx, position_tx).await;
+            });
+        }
+
+        for symbol in self.symbols() {
+            let ticker = Ticker(symbol.clone());
+
+            let mut indexer = self.indexer.lock().await;
+            let mut trades_feed = indexer.feed().trades(&ticker, false).await.unwrap();
+            let mut order_book_feed = indexer.feed().orders(&ticker, false).await.unwrap();
+
+            let symbol_clone = symbol.clone();
+            let sender_trades_clone = self.trades_tx.clone();
+            let sender_order_book_clone = self.order_book_tx.clone();
+
+            tokio::spawn(async move {
+                handle_trades_feed(&mut trades_feed, sender_trades_clone, &symbol_clone).await;
+            });
+
+            tokio::spawn(async move {
+                handle_order_book_feed(&mut order_book_feed, sender_order_book_clone, &symbol).await;
+            });
+
+            // self.trades_feed.insert(symbol.clone(), trades_feed);
+            // self.order_book_feed.insert(symbol.clone(), order_book_feed);
+        }
+    }
+
+    async fn watch_trades(
+        &self,
+        symbol: String,
+        _since: Option<u64>,
+        _limit: Option<u64>,
+    ) -> ccxt::CcxtTrade {
+        let mut rx = self.trades_rx.lock().await;
+        loop {
+            match rx.recv().await {
+                Some(trade) if trade.symbol == symbol => return trade,
+                Some(_) => continue,
+                None => panic!("trades channel closed"),
+            }
+        }
+    }
+
+    async fn watch_trades_for_symbols(
+        &self,
+        _symbols: Vec<String>,
+        _since: Option<u64>,
+        _limit: Option<u64>,
+    ) -> Vec<ccxt::CcxtTrade> {
+        todo!()
+    }
+
+    async fn watch_order_book(&self, symbol: String, _limit: Option<u8>) -> ccxt::CcxtOrderBook {
+        let mut rx = self.order_book_rx.lock().await;
+        loop {
+            match rx.recv().await {
+                Some(ob) if ob.symbol == symbol => return ob,
+                Some(_) => continue,
+                None => panic!("order book channel closed"),
+            }
+        }
+    }
+
+    async fn watch_balance(&self) -> ccxt::CcxtBalance {
+        let mut rx = self.balance_rx.lock().await;
+        rx.recv().await.expect("balance channel closed")
+    }
+
+    async fn watch_orders(
+        &self,
+        _symbol: String,
+        _since: Option<u64>,
+        _limit: Option<u64>,
+    ) -> ccxt::CcxtOrder {
+        todo!()
+    }
+
+    async fn watch_my_trades(
+        &self,
+        _symbols: Vec<String>,
+        _since: Option<u64>,
+        _limit: Option<u64>,
+    ) -> ccxt::CcxtTrade {
+        todo!()
+    }
+
+    async fn watch_positions(&self, _symbols: Vec<String>) -> ccxt::CcxtPosition {
+        let mut rx = self.position_rx.lock().await;
+        rx.recv().await.expect("position channel closed")
+    }
+
+    async fn create_order_ws(
+        &self,
+        _symbol: String,
+        _type_: ccxt::CcxtOrderType,
+        _side: ccxt::CcxtOrderSide,
+        _amount: rust_decimal::prelude::Decimal,
+        _price: Option<rust_decimal::prelude::Decimal>,
+    ) -> ccxt::CcxtOrder {
+        todo!()
+    }
+
+    async fn edit_order_ws(
+        &self,
+        _id: String,
+        _symbol: Option<String>,
+        _type_: Option<ccxt::CcxtOrderType>,
+        _side: Option<ccxt::CcxtOrderSide>,
+        _amount: Option<rust_decimal::prelude::Decimal>,
+        _price: Option<rust_decimal::prelude::Decimal>,
+    ) -> ccxt::CcxtOrder {
+        todo!()
+    }
+
+    async fn cancel_orders_ws(&self, _id: String) -> ccxt::CcxtOrder {
+        todo!()
+    }
+
+    async fn cancel_all_orders_ws(&self) {
+        todo!()
+    }
+}
+impl Info for Dydx {
+    fn symbols(&self) -> Vec<String> {
+        self.symbols.clone()
+    }
+
     fn name(&self) -> String {
         "dydx".into()
     }
 
-    fn symbols(&self) -> Vec<String> {
-        self.tickers.clone()
-    }
-}
-
-impl DataProvider for Dydx {
-    fn listen(
-        &self,
-        disruptor: MultiProducer<AppMessage, SingleConsumerBarrier>,
-    ) -> Pin<Box<dyn Future<Output = ()> + Send + '_>> {
-        let cfg = self.config.clone();
-        let tickers = self.tickers.clone();
-        let d = disruptor.clone();
-
-        Box::pin(async move {
-            let sock_cfg = SockConfig {
-                endpoint: cfg.indexer_ws_endpoint.clone(),
-                timeout: 5_000,
-                rate_limit: std::num::NonZeroU32::new(2).unwrap(),
-            };
-            let rest_cfg = RestConfig {
-                endpoint: "http://localhost".into(),
-            };
-            let indexer_cfg = IndexerConfig {
-                rest: rest_cfg,
-                sock: sock_cfg,
-            };
-
-            let mut indexer = IndexerClient::new(indexer_cfg);
-
-            let wallet = match Wallet::from_mnemonic(&cfg.mnemonic) {
-                Ok(w) => w,
-                Err(e) => {
-                    tracing::error!(error = %e, "failed to create wallet from mnemonic");
-                    return;
-                }
-            };
-            let account = match wallet.account_offline(0) {
-                Ok(a) => a,
-                Err(e) => {
-                    tracing::error!(error = %e, "failed to derive account");
-                    return;
-                }
-            };
-            tracing::info!(address = %account.address(), "dydx wallet derived");
-            let subaccount: Subaccount = match account.subaccount(cfg.subaccount_number) {
-                Ok(s) => s,
-                Err(e) => {
-                    tracing::error!(error = %e, "failed to create subaccount");
-                    return;
-                }
-            };
-
-            let mut handles = Vec::new();
-
-            for ticker_str in &tickers {
-                let ticker = Ticker(ticker_str.clone());
-
-                match indexer.feed().trades(&ticker, false).await {
-                    Ok(feed) => {
-                        let d = d.clone();
-                        let t = ticker_str.clone();
-                        handles.push(tokio::spawn(async move {
-                            handle_trades_feed(d, feed, t).await;
-                        }));
-                    }
-                    Err(e) => {
-                        tracing::error!(ticker = %ticker_str, error = %e, "failed to subscribe to trades");
-                    }
-                }
-
-                let d = d.clone();
-                let t = ticker_str.clone();
-                match indexer.feed().orders(&ticker, false).await {
-                    Ok(feed) => {
-                        handles.push(tokio::spawn(async move {
-                            handle_orders_feed(d, feed, t).await;
-                        }));
-                    }
-                    Err(e) => {
-                        tracing::error!(ticker = %ticker_str, error = %e, "failed to subscribe to orderbook");
-                    }
-                }
-            }
-
-            match indexer.feed().subaccounts(subaccount, false).await {
-                Ok(feed) => {
-                    let d = d.clone();
-                    handles.push(tokio::spawn(async move {
-                        handle_subaccounts_feed(d, feed).await;
-                    }));
-                }
-                Err(e) => {
-                    tracing::error!(error = %e, "failed to subscribe to subaccounts");
-                }
-            }
-
-            drop(indexer);
-
-            for h in handles {
-                let _ = h.await;
-            }
-        })
-    }
-}
-
-impl Executor for Dydx {
-    fn create_order(&self) {
-        todo!()
-    }
-
-    fn update_order(&self) {
-        todo!()
-    }
-
-    fn cancel_order(&self) {
-        todo!()
-    }
-
-    fn balance_of(&self, _symbol: Option<String>) {
-        let equity = *self.balance_rx.borrow();
-        tracing::info!(%equity, "dydx balance");
+    fn add_symbol(&mut self, symbol: String) {
+        self.symbols.push(symbol);
     }
 }
 
 impl Exchange for Dydx {}
+
+#[cfg(test)]
+mod tests {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message;
+
+    #[tokio::test]
+    async fn ping_latency_under_500ms() {
+        let (mut ws_stream, response) = connect_async("wss://indexer.dydx.trade/v4/ws")
+            .await
+            .expect("failed to connect");
+
+        assert!(
+            response.status().is_success() || response.status().as_u16() == 101,
+            "unexpected status: {}",
+            response.status(),
+        );
+
+        let payload: Vec<u8> = std::time::Instant::now()
+            .elapsed()
+            .as_nanos()
+            .to_be_bytes()
+            .to_vec();
+        let start = std::time::Instant::now();
+
+        ws_stream
+            .send(Message::Ping(payload.clone().into()))
+            .await
+            .expect("failed to send ping");
+
+        loop {
+            let msg = tokio::time::timeout(std::time::Duration::from_secs(5), ws_stream.next())
+                .await
+                .expect("timeout waiting for pong")
+                .expect("stream ended")
+                .expect("message error");
+
+            match msg {
+                Message::Pong(data) if data.as_ref() == payload.as_slice() => break,
+                _ => continue,
+            }
+        }
+
+        let latency = start.elapsed();
+        println!("ping latency dydx: {latency:?}");
+        assert!(
+            latency < std::time::Duration::from_millis(500),
+            "ping latency too high: {latency:?}",
+        );
+    }
+}
