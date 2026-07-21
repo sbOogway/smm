@@ -1,29 +1,26 @@
-use std::sync::Arc;
+use std::collections::{BTreeMap, HashMap};
 
 use crate::{
-    ccxt::{CcxtMessage, CcxtOrderBook, CcxtOrderBookLevel, CcxtOrderSide, CcxtTrade},
+    ccxt::{CcxtBalance, CcxtOrderBook, CcxtOrderBookLevel, CcxtOrderSide, CcxtPosition, CcxtPositionSide, CcxtTrade},
     config::DydxConfig,
     exchange::{Exchange, Info},
     utils::big_decimal_to_decimal,
 };
 use async_trait::async_trait;
-use bigdecimal::BigDecimal;
-use chrono::{DateTime, Utc};
+use bigdecimal::{ToPrimitive, Zero};
+use chrono::Utc;
 use dydx::{
     indexer::{
-        Feed, IndexerClient, IndexerConfig, OrderSide, OrdersMessage, Price, RestConfig,
-        SockConfig, Symbol, Ticker, TradesMessage,
-    },
-    node::{Subaccount, Wallet},
+        Feed, IndexerClient, IndexerConfig, OrderSide, OrderbookResponsePriceLevel, OrdersMessage, Price, Quantity, RestConfig, SockConfig, SubaccountsMessage, Ticker, TradesMessage,
+    }, node::Wallet,
 };
-use futures_util::stream::{FuturesUnordered, StreamExt};
+
 use rust_decimal::Decimal;
-use serde_json::Value::Null;
 
 use crate::ccxt::{self, Ccxt};
 use tokio::sync::{
     Mutex,
-    watch::{self, Receiver, Sender},
+    mpsc::{self, UnboundedReceiver, UnboundedSender},
 };
 
 impl From<OrderSide> for CcxtOrderSide {
@@ -38,17 +35,49 @@ impl From<OrderSide> for CcxtOrderSide {
 pub struct Dydx {
     indexer: Mutex<IndexerClient>,
     symbols: Vec<String>,
-    trades_tx: Sender<CcxtTrade>,
-    trades_rx: Receiver<CcxtTrade>,
-    order_book_tx: Sender<CcxtOrderBook>,
-    order_book_rx: Receiver<CcxtOrderBook>,
-    // trades_feed: HashMap<String, Feed<TradesMessage>>,
-    // order_book_feed: HashMap<String, Feed<OrdersMessage>>,
+    address: String,
+    subaccount_number: u32,
+    trades_tx: UnboundedSender<CcxtTrade>,
+    trades_rx: Mutex<UnboundedReceiver<CcxtTrade>>,
+    order_book_tx: UnboundedSender<CcxtOrderBook>,
+    order_book_rx: Mutex<UnboundedReceiver<CcxtOrderBook>>,
+    balance_tx: UnboundedSender<CcxtBalance>,
+    balance_rx: Mutex<UnboundedReceiver<CcxtBalance>>,
+    position_tx: UnboundedSender<CcxtPosition>,
+    position_rx: Mutex<UnboundedReceiver<CcxtPosition>>,
+}
+#[derive(Default, Debug)]
+pub struct OrderBook {
+    // Use `BTreeMap` for easier sorting. 
+    pub bids: BTreeMap<Price, (Quantity, u64)>,
+    pub asks: BTreeMap<Price, (Quantity, u64)>,
+    pub offset: u64,
+}
+ 
+impl OrderBook {
+    pub fn update_bids(&mut self, bids: Vec<OrderbookResponsePriceLevel>) {
+        Self::update(&mut self.bids, bids, &mut self.offset);
+    }
+ 
+    pub fn update_asks(&mut self, asks: Vec<OrderbookResponsePriceLevel>) {
+        Self::update(&mut self.asks, asks, &mut self.offset);
+    }
+ 
+    fn update(map: &mut BTreeMap<Price, (Quantity, u64)>, levels: Vec<OrderbookResponsePriceLevel>, offset: &mut u64) {
+        for level in levels {
+            if level.size.is_zero() {
+                map.remove(&level.price);
+            } else {
+                map.insert(level.price, (level.size, *offset));
+                *offset += 1;
+            }
+        }
+    }
 }
 
 async fn handle_trades_feed(
     feed: &mut Feed<TradesMessage>,
-    sender: Sender<CcxtTrade>,
+    sender: UnboundedSender<CcxtTrade>,
     symbol: &String,
 ) {
     loop {
@@ -58,20 +87,15 @@ async fn handle_trades_feed(
                 .trades
                 .iter()
                 .map(|trade| CcxtTrade {
-                    info: Null,
                     id: trade.id.0.clone(),
                     timestamp: trade.created_at.timestamp_millis(),
                     datetime: trade.created_at,
                     symbol: symbol.clone(),
                     order: Some(trade.id.0.clone()),
-                    order_type: None,
                     side: Some(trade.side.clone().into()),
-                    taker_or_maker: None,
                     price: big_decimal_to_decimal(trade.price.0.clone()),
                     amount: big_decimal_to_decimal(trade.size.0.clone()),
-                    cost: None,
-                    fee: None,
-                    fees: None,
+                    ..Default::default()
                 })
                 .collect::<Vec<CcxtTrade>>(),
             Some(dydx::indexer::TradesMessage::Update(trades)) => {
@@ -84,20 +108,15 @@ async fn handle_trades_feed(
                             .trades
                             .iter()
                             .map(|trade| CcxtTrade {
-                                info: Null,
                                 id: trade.id.0.clone(),
                                 timestamp: trade.created_at.timestamp_millis(),
                                 datetime: trade.created_at,
                                 symbol: symbol.clone(),
                                 order: Some(trade.id.0.clone()),
-                                order_type: None,
                                 side: Some(trade.side.clone().into()),
-                                taker_or_maker: None,
                                 price: big_decimal_to_decimal(trade.price.0.clone()),
                                 amount: big_decimal_to_decimal(trade.size.0.clone()),
-                                cost: None,
-                                fee: None,
-                                fees: None,
+                                ..Default::default()
                             })
                             .collect::<Vec<CcxtTrade>>()
                     })
@@ -113,77 +132,183 @@ async fn handle_trades_feed(
     }
 }
 
-async fn handle_order_book_feed(feed: &mut Feed<OrdersMessage>, sender: Sender<CcxtOrderBook>, symbol: &String) {
+fn book_to_ccxt(order_book: &OrderBook, symbol: &str, nonce: u64) -> CcxtOrderBook {
+    let best_bid = order_book.bids.last_key_value();
+    let best_ask = order_book.asks.first_key_value();
+
+    let bids = best_bid
+        .into_iter()
+        .map(|(price, (size, _))| CcxtOrderBookLevel {
+            price: big_decimal_to_decimal(price.0.clone()),
+            amount: big_decimal_to_decimal(size.0.clone()),
+        })
+        .collect();
+
+    let asks = best_ask
+        .into_iter()
+        .map(|(price, (size, _))| CcxtOrderBookLevel {
+            price: big_decimal_to_decimal(price.0.clone()),
+            amount: big_decimal_to_decimal(size.0.clone()),
+        })
+        .collect();
+
+    CcxtOrderBook {
+        bids,
+        asks,
+        symbol: symbol.to_string(),
+        nonce: Some(nonce),
+        ..Default::default()
+    }
+}
+
+async fn handle_order_book_feed(
+    feed: &mut Feed<OrdersMessage>,
+    sender: UnboundedSender<CcxtOrderBook>,
+    symbol: &String,
+) {
+    let mut book = OrderBook::default();
+
     loop {
-        let order_book = match feed.recv().await {
-            Some(dydx::indexer::OrdersMessage::Initial(order_book)) => {
-                let best_bid_price = big_decimal_to_decimal(
-                    order_book.contents.bids.first().unwrap().price.0.clone(),
-                );
-                let best_bid_amount = big_decimal_to_decimal(
-                    order_book.contents.bids.first().unwrap().size.0.clone(),
-                );
-                let best_ask_price = big_decimal_to_decimal(
-                    order_book.contents.asks.first().unwrap().price.0.clone(),
-                );
-                let best_ask_amount = big_decimal_to_decimal(
-                    order_book.contents.asks.first().unwrap().size.0.clone(),
-                );
-                CcxtOrderBook {
-                    bids: vec![CcxtOrderBookLevel {
-                        price: best_bid_price,
-                        amount: best_bid_amount,
-                    }],
-                    asks: vec![CcxtOrderBookLevel {
-                        price: best_ask_price,
-                        amount: best_ask_amount,
-                    }],
-                    symbol: symbol.to_string(),
-                    timestamp: None,
-                    datetime: None,
-                    nonce: None,
+        match feed.recv().await {
+            Some(dydx::indexer::OrdersMessage::Initial(initial)) => {
+                book.bids.clear();
+                book.asks.clear();
+                book.update_bids(initial.contents.bids);
+                book.update_asks(initial.contents.asks);
+                let ob = book_to_ccxt(&book, symbol, initial.message_id);
+                let _ = sender.send(ob);
+            }
+            Some(dydx::indexer::OrdersMessage::Update(update)) => {
+                if let Some(bids) = update.contents.bids {
+                    book.update_bids(bids);
+                }
+                if let Some(asks) = update.contents.asks {
+                    book.update_asks(asks);
+                }
+                let ob = book_to_ccxt(&book, symbol, update.message_id);
+                let _ = sender.send(ob);
+            }
+            None => {
+                tracing::warn!("order book feed closed for {symbol}");
+                break;
+            }
+        }
+    }
+}
+
+async fn handle_subaccount_feed(
+    feed: &mut Feed<SubaccountsMessage>,
+    balance_tx: UnboundedSender<CcxtBalance>,
+    position_tx: UnboundedSender<CcxtPosition>,
+) {
+    loop {
+        match feed.recv().await {
+            Some(SubaccountsMessage::Initial(initial)) => {
+                let subaccount = &initial.contents.subaccount;
+                let free_collateral = big_decimal_to_decimal(subaccount.free_collateral.clone())
+                    .to_f64()
+                    .unwrap_or(0.0);
+                let mut usdc_balance = free_collateral;
+
+                for (ticker, asset) in &subaccount.asset_positions {
+                    if ticker.0 == "USDC" {
+                        usdc_balance = big_decimal_to_decimal(asset.size.0.clone())
+                            .to_f64()
+                            .unwrap_or(0.0);
+                    }
+                }
+
+                let mut free = HashMap::new();
+                free.insert("USDC".into(), usdc_balance);
+
+                let _ = balance_tx.send(CcxtBalance {
+                    timestamp: Utc::now().timestamp() as u64,
+                    datetime: Utc::now().to_rfc3339(),
+                    free,
+                    ..Default::default()
+                });
+
+                for (_ticker, position) in &subaccount.open_perpetual_positions {
+                    let side = match position.side {
+                        dydx::indexer::PositionSide::Long => CcxtPositionSide::Long,
+                        dydx::indexer::PositionSide::Short => CcxtPositionSide::Short,
+                    };
+                    let contracts = big_decimal_to_decimal(position.size.0.clone());
+                    let entry_price = big_decimal_to_decimal(position.entry_price.0.clone());
+                    let unrealized_pnl = big_decimal_to_decimal(position.unrealized_pnl.clone());
+
+                    let _ = position_tx.send(CcxtPosition {
+                        id: position.market.0.clone(),
+                        symbol: position.market.0.clone(),
+                        timestamp: Utc::now().timestamp() as u64,
+                        datetime: Utc::now().to_rfc3339(),
+                        side,
+                        contracts,
+                        contract_size: Decimal::ONE,
+                        entry_price,
+                        unrealized_pnl,
+                        liquidation_price: Decimal::ZERO,
+                        ..Default::default()
+                    });
                 }
             }
-            Some(dydx::indexer::OrdersMessage::Update(order_book)) => {
-                let (best_bid_price, best_bid_amount) = match order_book.contents.bids.clone() {
-                    Some(bids) => (
-                        big_decimal_to_decimal(bids.first().unwrap().price.0.clone()),
-                        big_decimal_to_decimal(bids.first().unwrap().size.0.clone()),
-                    ),
-                    None => (Decimal::ZERO, Decimal::ZERO),
-                };
-                let (best_ask_price, best_ask_amount) = match order_book.contents.asks.clone() {
-                    Some(asks) => (
-                        big_decimal_to_decimal(asks.first().unwrap().price.0.clone()),
-                        big_decimal_to_decimal(asks.first().unwrap().size.0.clone()),
-                    ),
-                    None => (Decimal::ZERO, Decimal::ZERO),
-                };
-                CcxtOrderBook {
-                    bids: vec![CcxtOrderBookLevel {
-                        price: best_bid_price,
-                        amount: best_bid_amount,
-                    }],
-                    asks: vec![CcxtOrderBookLevel {
-                        price: best_ask_price,
-                        amount: best_ask_amount,
-                    }],
-                    symbol: symbol.to_string(),
-                    timestamp: None,
-                    datetime: None,
-                    nonce: None,
+            Some(SubaccountsMessage::Update(update)) => {
+                let mut free = HashMap::new();
+
+                for content in &update.contents {
+                    if let Some(asset_positions) = &content.asset_positions {
+                        for asset in asset_positions {
+                            let size = big_decimal_to_decimal(asset.size.0.clone())
+                                .to_f64()
+                                .unwrap_or(0.0);
+                            let symbol = asset.symbol.0.clone();
+                            free.insert(symbol, size);
+                        }
+                    }
+
+                    if let Some(perpetual_positions) = &content.perpetual_positions {
+                        for position in perpetual_positions {
+                            let side = match position.side {
+                                dydx::indexer::PositionSide::Long => CcxtPositionSide::Long,
+                                dydx::indexer::PositionSide::Short => CcxtPositionSide::Short,
+                            };
+                            let contracts = big_decimal_to_decimal(position.size.0.clone());
+                            let entry_price = big_decimal_to_decimal(position.entry_price.0.clone());
+                            let unrealized_pnl = position.unrealized_pnl.as_ref()
+                                .map(|v| big_decimal_to_decimal(v.clone()))
+                                .unwrap_or(Decimal::ZERO);
+
+                            let _ = position_tx.send(CcxtPosition {
+                                id: position.position_id.clone(),
+                                symbol: position.market.0.clone(),
+                                timestamp: Utc::now().timestamp() as u64,
+                                datetime: Utc::now().to_rfc3339(),
+                                side,
+                                contracts,
+                                contract_size: Decimal::ONE,
+                                entry_price,
+                                unrealized_pnl,
+                                liquidation_price: Decimal::ZERO,
+                                ..Default::default()
+                            });
+                        }
+                    }
+                }
+
+                if !free.is_empty() {
+                    let _ = balance_tx.send(CcxtBalance {
+                        timestamp: Utc::now().timestamp() as u64,
+                        datetime: Utc::now().to_rfc3339(),
+                        free,
+                        ..Default::default()
+                    });
                 }
             }
-            None => CcxtOrderBook {
-                bids: todo!(),
-                asks: todo!(),
-                symbol: symbol.to_string(),
-                timestamp: todo!(),
-                datetime: todo!(),
-                nonce: todo!(),
-            },
-        };
-        let _ = sender.send(order_book.clone());
+            None => {
+                tracing::warn!("balance feed closed");
+                break;
+            }
+        }
     }
 }
 
@@ -219,47 +344,24 @@ impl Dydx {
             }
         };
         tracing::info!(address = %account.address(), "dydx wallet derived");
-        let _subaccount: Subaccount = match account.subaccount(cfg.subaccount_number) {
-            Ok(s) => s,
-            Err(e) => {
-                tracing::error!(error = %e, "failed to create subaccount");
-                panic!();
-            }
-        };
 
-        let (trades_tx, trades_rx) = watch::channel::<CcxtTrade>(CcxtTrade {
-            info: Null,
-            id: "null".into(),
-            timestamp: 0,
-            datetime: Utc::now(),
-            symbol: "none".into(),
-            order: None,
-            order_type: None,
-            side: None,
-            taker_or_maker: None,
-            price: Decimal::ZERO,
-            amount: Decimal::ZERO,
-            cost: None,
-            fee: None,
-            fees: None,
-        });
-        let (order_book_tx, order_book_rx) = watch::channel::<CcxtOrderBook>(CcxtOrderBook {
-            bids: Vec::new(),
-            asks: Vec::new(),
-            symbol: "none".into(),
-            timestamp: None,
-            datetime: None,
-            nonce: None,
-        });
+        let (trades_tx, trades_rx) = mpsc::unbounded_channel::<CcxtTrade>();
+        let (order_book_tx, order_book_rx) = mpsc::unbounded_channel::<CcxtOrderBook>();
+        let (balance_tx, balance_rx) = mpsc::unbounded_channel::<CcxtBalance>();
+        let (position_tx, position_rx) = mpsc::unbounded_channel::<CcxtPosition>();
         Self {
             indexer: Mutex::new(indexer),
-            // trades_feed: HashMap::new(),
-            // order_book_feed: HashMap::new(),
             symbols: Vec::new(),
+            address: account.address().to_string(),
+            subaccount_number: cfg.subaccount_number,
             trades_tx,
-            trades_rx,
+            trades_rx: Mutex::new(trades_rx),
             order_book_tx,
-            order_book_rx,
+            order_book_rx: Mutex::new(order_book_rx),
+            balance_tx,
+            balance_rx: Mutex::new(balance_rx),
+            position_tx,
+            position_rx: Mutex::new(position_rx),
         }
     }
 }
@@ -267,6 +369,20 @@ impl Dydx {
 #[async_trait]
 impl Ccxt for Dydx {
     async fn load_markets(&mut self) {
+        {
+            let mut indexer = self.indexer.lock().await;
+            let subaccount: dydx::indexer::Subaccount = dydx::indexer::Subaccount::new(
+                self.address.parse().unwrap(),
+                self.subaccount_number.try_into().unwrap(),
+            );
+            let mut balance_feed = indexer.feed().subaccounts(subaccount, false).await.unwrap();
+            let balance_tx = self.balance_tx.clone();
+            let position_tx = self.position_tx.clone();
+            tokio::spawn(async move {
+                handle_subaccount_feed(&mut balance_feed, balance_tx, position_tx).await;
+            });
+        }
+
         for symbol in self.symbols() {
             let ticker = Ticker(symbol.clone());
 
@@ -297,12 +413,19 @@ impl Ccxt for Dydx {
         _since: Option<u64>,
         _limit: Option<u64>,
     ) -> ccxt::CcxtTrade {
-
+        let mut rx = self.trades_rx.lock().await;
+        loop {
+            match rx.recv().await {
+                Some(trade) if trade.symbol == symbol => return trade,
+                Some(_) => continue,
+                None => panic!("trades channel closed"),
+            }
+        }
     }
 
     async fn watch_trades_for_symbols(
         &self,
-        symbols: Vec<String>,
+        _symbols: Vec<String>,
         _since: Option<u64>,
         _limit: Option<u64>,
     ) -> Vec<ccxt::CcxtTrade> {
@@ -310,12 +433,19 @@ impl Ccxt for Dydx {
     }
 
     async fn watch_order_book(&self, symbol: String, _limit: Option<u8>) -> ccxt::CcxtOrderBook {
-
-
+        let mut rx = self.order_book_rx.lock().await;
+        loop {
+            match rx.recv().await {
+                Some(ob) if ob.symbol == symbol => return ob,
+                Some(_) => continue,
+                None => panic!("order book channel closed"),
+            }
+        }
     }
 
     async fn watch_balance(&self) -> ccxt::CcxtBalance {
-        todo!()
+        let mut rx = self.balance_rx.lock().await;
+        rx.recv().await.expect("balance channel closed")
     }
 
     async fn watch_orders(
@@ -337,7 +467,8 @@ impl Ccxt for Dydx {
     }
 
     async fn watch_positions(&self, _symbols: Vec<String>) -> ccxt::CcxtPosition {
-        todo!()
+        let mut rx = self.position_rx.lock().await;
+        rx.recv().await.expect("position channel closed")
     }
 
     async fn create_order_ws(
@@ -386,3 +517,55 @@ impl Info for Dydx {
 }
 
 impl Exchange for Dydx {}
+
+#[cfg(test)]
+mod tests {
+    use futures_util::{SinkExt, StreamExt};
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message;
+
+    #[tokio::test]
+    async fn ping_latency_under_500ms() {
+        let (mut ws_stream, response) = connect_async("wss://indexer.dydx.trade/v4/ws")
+            .await
+            .expect("failed to connect");
+
+        assert!(
+            response.status().is_success() || response.status().as_u16() == 101,
+            "unexpected status: {}",
+            response.status(),
+        );
+
+        let payload: Vec<u8> = std::time::Instant::now()
+            .elapsed()
+            .as_nanos()
+            .to_be_bytes()
+            .to_vec();
+        let start = std::time::Instant::now();
+
+        ws_stream
+            .send(Message::Ping(payload.clone().into()))
+            .await
+            .expect("failed to send ping");
+
+        loop {
+            let msg = tokio::time::timeout(std::time::Duration::from_secs(5), ws_stream.next())
+                .await
+                .expect("timeout waiting for pong")
+                .expect("stream ended")
+                .expect("message error");
+
+            match msg {
+                Message::Pong(data) if data.as_ref() == payload.as_slice() => break,
+                _ => continue,
+            }
+        }
+
+        let latency = start.elapsed();
+        println!("ping latency dydx: {latency:?}");
+        assert!(
+            latency < std::time::Duration::from_millis(500),
+            "ping latency too high: {latency:?}",
+        );
+    }
+}

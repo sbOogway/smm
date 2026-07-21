@@ -7,11 +7,6 @@ pub mod dydx;
 // pub mod hyperliquid;
 // pub mod types;
 
-use std::{future::Future, pin::Pin};
-
-use disruptor::{MultiProducer, SingleConsumerBarrier};
-use rust_decimal::Decimal;
-
 use crate::ccxt::Ccxt;
 use crate::config::AppConfig;
 use crate::exchange::dydx::Dydx;

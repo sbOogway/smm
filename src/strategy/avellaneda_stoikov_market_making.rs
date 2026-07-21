@@ -6,7 +6,6 @@
 //! <https://doi.org/10.1080/14697680701381228>
 
 use std::{
-    future,
     sync::{Arc, OnceLock},
     time::Duration,
 };
@@ -14,7 +13,6 @@ use std::{
 use async_trait::async_trait;
 use disruptor::{MultiProducer, ProcessorSettings, SingleConsumerBarrier, Sleep};
 use rust_decimal::{Decimal, MathematicalOps};
-use tokio::sync::Mutex;
 
 use crate::{
     ccxt::CcxtMessage,
@@ -23,7 +21,7 @@ use crate::{
         expiration_buffer::{self, ExpirationBuffer},
         memory_map::{self, MemoryMap},
     },
-    exchange::{self, Exchange, Info, dydx::Dydx},
+    exchange::{Exchange, Info, dydx::Dydx},
     strategy::Strategy,
 };
 
@@ -132,8 +130,8 @@ impl AvellanedaStoikovMarketMaking {
 
                 let optimal_spread = AvellanedaStoikovMarketMaking::optimal_spread(γ, κ);
 
-                let asmm_bid_price = reservation_price - optimal_spread / Decimal::new(2, 0);
-                let asmm_ask_price = reservation_price + optimal_spread / Decimal::new(2, 0);
+                let _asmm_bid_price = reservation_price - optimal_spread / Decimal::new(2, 0);
+                let _asmm_ask_price = reservation_price + optimal_spread / Decimal::new(2, 0);
 
                 state.set(bid_price_key, bid_price);
                 state.set(bid_size_key, bid_size);
@@ -183,7 +181,7 @@ impl Strategy for AvellanedaStoikovMarketMaking {
     }
 
     async fn run(mut self: Box<Self>) {
-        let symbols: Vec<String> = vec!["BTC-USD".into()]; //, "ETH-USD".into()];
+        let symbols: Vec<String> = vec!["BTC-USD".into()];
 
         for s in &symbols {
             self.exchange.add_symbol(s.clone());
@@ -192,13 +190,50 @@ impl Strategy for AvellanedaStoikovMarketMaking {
         let symbol = self.exchange.symbols().first().unwrap().to_string();
         self.exchange.load_markets().await;
 
-        loop {
-            tokio::select! {
-                trade = self.exchange.watch_trades(symbol.clone(), None, None) => {tracing::debug!("{:#?}", trade);}
-                order_book = self.exchange.watch_order_book(symbol.clone(), None) => {tracing::debug!("{:#?}", order_book)}
-            }
-        }
+        let exchange: Arc<dyn Exchange> = Arc::from(self.exchange);
 
-        future::pending::<()>().await;
+        let h1 = {
+            let exchange = exchange.clone();
+            let symbol = symbol.clone();
+            tokio::spawn(async move {
+                loop {
+                    let trade = exchange.watch_trades(symbol.clone(), None, None).await;
+                    tracing::debug!("trade: {:#?}", trade);
+                }
+            })
+        };
+
+        let h2 = {
+            let exchange = exchange.clone();
+            let symbol = symbol.clone();
+            tokio::spawn(async move {
+                loop {
+                    let ob = exchange.watch_order_book(symbol.clone(), None).await;
+                    tracing::debug!("order_book: {:#?}", ob);
+                }
+            })
+        };
+
+        let h3 = {
+            let exchange = exchange.clone();
+            tokio::spawn(async move {
+                loop {
+                    let balance = exchange.watch_balance().await;
+                    tracing::info!("{:#?}", balance);
+                }
+            })
+        };
+
+        let h4 = {
+            let exchange = exchange.clone();
+            tokio::spawn(async move {
+                loop {
+                    let position = exchange.watch_positions(vec![]).await;
+                    tracing::info!("{:#?}", position);
+                }
+            })
+        };
+
+        let _ = tokio::join!(h1, h2, h3, h4);
     }
 }
